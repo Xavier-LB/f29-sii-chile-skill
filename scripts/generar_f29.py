@@ -1,59 +1,50 @@
 """
-generar_f29.py — Genera un archivo Excel con el Formulario 29 completo.
-Versión 2.0 — Con detalle de documentos por línea.
+generar_f29.py v3 — Genera Excel F29 con estilo SII.
 
 Uso:
     from scripts.generar_f29 import generar_f29_excel
     generar_f29_excel(datos, output_path)
 
-    donde `datos` es un dict con la estructura definida abajo.
+    datos puede tener:
+    - "codigos": dict de código F29 → valor (modo directo)
+    - O la estructura tradicional con "ventas", "compras", "documentos"
 """
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-from datetime import datetime
 
 # ============================================================
-# Colores y estilos
+# Estilos SII
 # ============================================================
-AZUL_SII = "1F3864"
-AZUL_CLARO = "D6E4F0"
-AMARILLO_INPUT = "FFF2CC"
-VERDE_CALCULO = "E2EFDA"
-GRIS_HEADER = "D9D9D9"
-ROJO_ALERTA = "FCE4EC"
-BLANCO = "FFFFFF"
-VERDE_CLARO = "E8F5E9"
-NARANJA_CLARO = "FFF3E0"
+BLUE = "D9EDF7"
+GRAY = "E8E8E8"
+LGRAY = "EEEEEE"
+WHITE = "FFFFFF"
+BLACK = "000000"
 
-FONT_HEADER = Font(name="Arial", size=12, bold=True, color=BLANCO)
-FONT_SECTION = Font(name="Arial", size=10, bold=True, color=AZUL_SII)
-FONT_NORMAL = Font(name="Arial", size=9, color="333333")
-FONT_CODE = Font(name="Arial", size=9, bold=True, color=AZUL_SII)
-FONT_TOTAL = Font(name="Arial", size=10, bold=True, color="CC0000")
-FONT_SMALL = Font(name="Arial", size=8, color="666666")
-FONT_DOC = Font(name="Arial", size=8, color="444444")
-FONT_DOC_BOLD = Font(name="Arial", size=8, bold=True, color="333333")
+FILL_BLUE = PatternFill(start_color=BLUE, end_color=BLUE, fill_type="solid")
+FILL_GRAY = PatternFill(start_color=GRAY, end_color=GRAY, fill_type="solid")
+FILL_LGRAY = PatternFill(start_color=LGRAY, end_color=LGRAY, fill_type="solid")
+FILL_WHITE = PatternFill(start_color=WHITE, end_color=WHITE, fill_type="solid")
 
-FILL_HEADER = PatternFill(start_color=AZUL_SII, end_color=AZUL_SII, fill_type="solid")
-FILL_SECTION = PatternFill(start_color=AZUL_CLARO, end_color=AZUL_CLARO, fill_type="solid")
-FILL_CALC = PatternFill(start_color=VERDE_CALCULO, end_color=VERDE_CALCULO, fill_type="solid")
-FILL_TOTAL = PatternFill(start_color=GRIS_HEADER, end_color=GRIS_HEADER, fill_type="solid")
-FILL_ALERTA = PatternFill(start_color=ROJO_ALERTA, end_color=ROJO_ALERTA, fill_type="solid")
-FILL_DEBITO_ROW = PatternFill(start_color=NARANJA_CLARO, end_color=NARANJA_CLARO, fill_type="solid")
-FILL_CREDITO_ROW = PatternFill(start_color=VERDE_CLARO, end_color=VERDE_CLARO, fill_type="solid")
+F10B = Font(name="Arial", size=10, bold=True, color=BLACK)
+F8B = Font(name="Arial", size=8, bold=True, color=BLACK)
+F8 = Font(name="Arial", size=8, color=BLACK)
+F7 = Font(name="Arial", size=7, color=BLACK)
+F7B = Font(name="Arial", size=7, bold=True, color=BLACK)
 
-BORDER_THIN = Border(
-    left=Side(style="thin", color="AAAAAA"),
-    right=Side(style="thin", color="AAAAAA"),
-    top=Side(style="thin", color="AAAAAA"),
-    bottom=Side(style="thin", color="AAAAAA"),
+AL = Alignment(horizontal="left", vertical="center", wrap_text=True)
+AC = Alignment(horizontal="center", vertical="center", wrap_text=True)
+AR = Alignment(horizontal="right", vertical="center", wrap_text=True)
+AJ = Alignment(horizontal="justify", vertical="center", wrap_text=True)
+
+BORDER = Border(
+    left=Side(style="medium", color=BLACK),
+    right=Side(style="medium", color=BLACK),
+    top=Side(style="medium", color=BLACK),
+    bottom=Side(style="medium", color=BLACK),
 )
-
-ALIGN_CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
-ALIGN_RIGHT = Alignment(horizontal="right", vertical="center")
-ALIGN_LEFT = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
 MESES = {
     1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
@@ -61,162 +52,200 @@ MESES = {
     9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
 }
 
+NCOLS = 7  # Columnas A-G
 
-def formato_peso(valor):
-    """Formatea un número como peso chileno."""
-    if valor is None or valor == 0:
+
+def fmt(v):
+    """Formatea número con separador de miles chileno."""
+    if v is None:
+        return ""
+    if isinstance(v, float):
+        if v == int(v):
+            v = int(v)
+        else:
+            return f"{v:,.1f}".replace(",", ".")
+    if isinstance(v, int):
+        if v == 0:
+            return ""
+        return f"{v:,}".replace(",", ".")
+    return str(v)
+
+
+def formato_peso(v):
+    """Formato con signo $ para compatibilidad."""
+    if v is None or v == 0:
         return "$0"
-    if valor < 0:
-        return f"-${abs(int(valor)):,}".replace(",", ".")
-    return f"${int(valor):,}".replace(",", ".")
+    if isinstance(v, float):
+        v = int(v)
+    if v < 0:
+        return f"-${abs(v):,}".replace(",", ".")
+    return f"${v:,}".replace(",", ".")
 
 
 # ============================================================
-# Estructura de documentos
+# Helpers de escritura
 # ============================================================
-"""
-Cada línea del F29 puede tener una lista de documentos asociados.
-Se pasan en datos["documentos"] organizado por línea:
 
-{
-    "linea_7": [   # Facturas afectas del giro
-        {
-            "tipo": "factura",
-            "numero": "F-00101",
-            "fecha": "2026-01-05",
-            "rut": "76.543.210-K",
-            "razon_social": "Cliente SpA",
-            "descripcion": "Desarrollo módulo X",
-            "neto": 5000000,
-            "iva": 950000,
-            "exento": 0,
-            "total": 5950000,
-        },
-        ...
-    ],
-    "linea_13": [ ... ],   # Notas de crédito emitidas
-    "linea_1":  [ ... ],   # Facturas de exportación
-    "linea_28": [ ... ],   # Facturas recibidas del giro (compras)
-    "linea_31": [ ... ],   # Facturas activo fijo
-    "linea_5":  [ ... ],   # Facturas de compra (serv. digitales)
-    "linea_61": [          # Boletas de honorarios
-        {
-            "tipo": "boleta_honorarios",
-            "numero": "BH-3001",
-            "fecha": "2026-01-31",
-            "rut": "15.123.456-7",
-            "razon_social": "Juan Pérez",
-            "descripcion": "Desarrollo frontend",
-            "bruto": 2000000,
-            "retencion": 305000,
-            "liquido": 1695000,
-        },
-    ],
-    "linea_60": [          # Liquidaciones de sueldo (IUSC)
-        {
-            "tipo": "liquidacion_sueldo",
-            "numero": "LIQ-001",
-            "fecha": "2026-01-31",
-            "rut": "17.111.222-3",
-            "razon_social": "Andrea López",
-            "cargo": "Tech Lead",
-            "bruto": 3500000,
-            "iusc": 185000,
-            "liquido": 2800000,
-        },
-    ],
-}
-
-Si datos["documentos"] tiene entradas para una línea, los totales se
-recalculan desde los documentos. Si no, se usan los totales de
-datos["ventas"] / datos["compras"] / datos["retenciones"].
-"""
-
-LINEAS_INFO = {
-    "linea_1":  {"linea": "1",  "codigo": "585/20",  "nombre": "Facturas de Exportación", "seccion": "debito"},
-    "linea_2":  {"linea": "2",  "codigo": "586/142", "nombre": "Ventas/Servicios Exentos del Giro", "seccion": "debito"},
-    "linea_5":  {"linea": "5",  "codigo": "515/587", "nombre": "Facturas de Compra (Serv. Digitales Extranjeros)", "seccion": "debito"},
-    "linea_7":  {"linea": "7",  "codigo": "503/502", "nombre": "Facturas Afectas del Giro", "seccion": "debito"},
-    "linea_9":  {"linea": "9",  "codigo": "716/717", "nombre": "Ventas Activo Fijo (No del Giro)", "seccion": "debito"},
-    "linea_10": {"linea": "10", "codigo": "110/111", "nombre": "Boletas", "seccion": "debito"},
-    "linea_11": {"linea": "11", "codigo": "758/759", "nombre": "Boletas Electrónicas / POS", "seccion": "debito"},
-    "linea_12": {"linea": "12", "codigo": "512/513", "nombre": "Notas de Débito Emitidas", "seccion": "debito"},
-    "linea_13": {"linea": "13", "codigo": "509/510", "nombre": "Notas de Crédito Emitidas", "seccion": "debito"},
-    "linea_28": {"linea": "28", "codigo": "519/520", "nombre": "Facturas Recibidas del Giro", "seccion": "credito"},
-    "linea_29": {"linea": "29", "codigo": "761/762", "nombre": "Facturas Supermercados/Comercios", "seccion": "credito"},
-    "linea_31": {"linea": "31", "codigo": "524/525", "nombre": "Facturas Activo Fijo", "seccion": "credito"},
-    "linea_32": {"linea": "32", "codigo": "527/528", "nombre": "Notas de Crédito Recibidas", "seccion": "credito"},
-    "linea_33": {"linea": "33", "codigo": "531/532", "nombre": "Notas de Débito Recibidas", "seccion": "credito"},
-    "linea_34": {"linea": "34", "codigo": "534/535", "nombre": "DIN Importaciones del Giro", "seccion": "credito"},
-    "linea_35": {"linea": "35", "codigo": "536/553", "nombre": "DIN Importaciones Activo Fijo", "seccion": "credito"},
-    "linea_60": {"linea": "60", "codigo": "48",      "nombre": "Impuesto Único 2da Categoría (Sueldos)", "seccion": "retencion"},
-    "linea_61": {"linea": "61", "codigo": "151",     "nombre": "Retención Honorarios Art. 42 N°2", "seccion": "retencion"},
-}
-
-COLUMNAS_VENTAS = ["N° Doc", "Fecha", "RUT Cliente", "Razón Social", "Descripción", "Neto", "IVA", "Exento", "Total"]
-COLUMNAS_COMPRAS = ["N° Doc", "Fecha", "RUT Proveedor", "Razón Social", "Descripción", "Neto", "IVA", "Total"]
-COLUMNAS_HONORARIOS = ["N° Boleta", "Fecha", "RUT Profesional", "Razón Social", "Descripción", "Bruto", "Retención", "Líquido"]
-COLUMNAS_SUELDOS = ["N° Liquidación", "Fecha", "RUT Trabajador", "Nombre", "Cargo", "Sueldo Bruto", "IUSC", "Líquido"]
+def _c(ws, r, c, val, font=F7, fill=FILL_WHITE, align=AL):
+    """Escribe una celda con formato."""
+    cell = ws.cell(row=r, column=c, value=val)
+    cell.font = font
+    cell.fill = fill
+    cell.alignment = align
+    cell.border = BORDER
+    return cell
 
 
-def get_columnas_para_linea(seccion, linea_key):
-    if linea_key == "linea_61":
-        return COLUMNAS_HONORARIOS
-    elif linea_key == "linea_60":
-        return COLUMNAS_SUELDOS
-    elif seccion == "debito":
-        return COLUMNAS_VENTAS
-    else:
-        return COLUMNAS_COMPRAS
+def _borders(ws, r, c1, c2):
+    """Aplica bordes a un rango de celdas."""
+    for c in range(c1, c2 + 1):
+        ws.cell(row=r, column=c).border = BORDER
 
 
-def get_doc_values(doc, seccion, linea_key):
-    """Extrae los valores de un documento como lista, según el tipo de columnas."""
-    if linea_key == "linea_61":
-        return [
-            doc.get("numero", ""),
-            doc.get("fecha", ""),
-            doc.get("rut", ""),
-            doc.get("razon_social", ""),
-            doc.get("descripcion", ""),
-            doc.get("bruto", doc.get("neto", 0)),
-            doc.get("retencion", doc.get("iva", 0)),
-            doc.get("liquido", doc.get("total", 0)),
-        ]
-    elif linea_key == "linea_60":
-        return [
-            doc.get("numero", ""),
-            doc.get("fecha", ""),
-            doc.get("rut", ""),
-            doc.get("razon_social", doc.get("nombre", "")),
-            doc.get("cargo", doc.get("descripcion", "")),
-            doc.get("bruto", doc.get("neto", 0)),
-            doc.get("iusc", doc.get("iva", 0)),
-            doc.get("liquido", doc.get("total", 0)),
-        ]
-    elif seccion == "debito":
-        return [
-            doc.get("numero", ""),
-            doc.get("fecha", ""),
-            doc.get("rut", ""),
-            doc.get("razon_social", ""),
-            doc.get("descripcion", ""),
-            doc.get("neto", 0),
-            doc.get("iva", 0),
-            doc.get("exento", 0),
-            doc.get("total", 0),
-        ]
-    else:
-        return [
-            doc.get("numero", ""),
-            doc.get("fecha", ""),
-            doc.get("rut", ""),
-            doc.get("razon_social", ""),
-            doc.get("descripcion", ""),
-            doc.get("neto", 0),
-            doc.get("iva", 0),
-            doc.get("total", 0),
-        ]
+def _section(ws, r, text, font=F10B):
+    """Escribe un encabezado de sección que abarca todas las columnas."""
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=NCOLS)
+    cell = ws.cell(row=r, column=1, value=text)
+    cell.font = font
+    cell.fill = FILL_BLUE
+    cell.alignment = AJ if font == F10B else AC
+    for c in range(1, NCOLS + 1):
+        ws.cell(row=r, column=c).fill = FILL_BLUE
+        ws.cell(row=r, column=c).border = BORDER
+    return r + 1
+
+
+def _colhdr(ws, r, qty_label="Cantidad de documentos", amt_label="Débitos"):
+    """Escribe fila de encabezados de columna."""
+    headers = [
+        (1, "Línea", AC),
+        (2, "", AC),
+        (3, "Cód", AC),
+        (4, qty_label, AC),
+        (5, "Cód", AC),
+        (6, amt_label, AC),
+        (7, "+/-", AC),
+    ]
+    for c, val, align in headers:
+        _c(ws, r, c, val, F7B, FILL_BLUE, align)
+    return r + 1
+
+
+def _line(ws, r, num, desc, cq, cv, ca, av, op, total=False):
+    """Escribe una línea de datos del F29."""
+    f = F7B if total else F7
+    fd = FILL_GRAY if total else FILL_WHITE
+    fv = FILL_GRAY if total else FILL_WHITE
+
+    _c(ws, r, 1, num, f, FILL_GRAY, AC)        # Línea
+    _c(ws, r, 2, desc, f, fd, AL)              # Descripción
+    _c(ws, r, 3, cq or "", F7, FILL_BLUE, AC)  # Código cant
+    _c(ws, r, 4, fmt(cv), f, fv, AR)           # Cantidad
+    _c(ws, r, 5, ca or "", F7, FILL_BLUE, AC)  # Código monto
+    _c(ws, r, 6, fmt(av), f, fv, AR)           # Monto
+    _c(ws, r, 7, op, f, FILL_GRAY, AC)         # Operador
+    return r + 1
+
+
+# ============================================================
+# Definición de líneas del F29
+# ============================================================
+# Cada línea: (num, descripción, código_cant, código_monto, operador)
+
+DEBITOS_INFO = [
+    ("1", "Exportaciones", 585, 20, ""),
+    ("2", "Ventas y/o Servicios prestados Exentos o No Gravados del giro", 586, 142, ""),
+    ("3", "Ventas con retención sobre el margen de comercialización (contribuyentes retenidos)", 731, 732, ""),
+    ("4", "Ventas y/o Servicios prestados Exentos o No Gravados que no son del giro", 714, 715, ""),
+    ("5", "Facturas de Compra recibidas con retención total (contribuyentes retenidos) y Factura de Inicio emitida", 515, 587, ""),
+    ("6", "Facturas de compra recibidas con retención parcial (Total neto)", None, 720, ""),
+]
+
+DEBITOS_GENERA = [
+    ("7", "Facturas emitidas por ventas y servicios del giro", 503, 502, "+"),
+    ("8", "Facturas emitidas por la venta de bienes inmuebles afectas a IVA", 763, 764, "+"),
+    ("9", "Facturas y Notas de Débitos por ventas y servicios que no son del giro (activo fijo y otros)", 716, 717, "+"),
+    ("10", "Boletas", 110, 111, "+"),
+    ("11", "Comprobantes o Recibos de Pago (transacciones medios electrónicos)", 758, 759, "+"),
+    ("12", "Notas de débito emitidas del giro y ND recibidas por retención parcial cambio de sujeto", 512, 513, "+"),
+    ("13", "Notas de Crédito emitidas por Facturas del giro y NC recibidas por retención parcial cambio de sujeto", 509, 510, "-"),
+    ("14", "NC emitidas por Vales de máquinas autorizadas por el Servicio", 708, 709, "-"),
+    ("15", "NC emitidas por ventas y servicios que no son del giro (activo fijo y otros)", 733, 734, "-"),
+    ("16", "FC recibidas con retención parcial (contribuyentes retenidos)", 516, 517, "+"),
+    ("17", "Liquidación y Liquidación Factura", 500, 501, "+"),
+    ("18", "Adiciones al Débito Fiscal del mes, Art. 27 bis", None, 154, "+"),
+    ("19", "Restitución Adicional Art. 27 bis, inc. 2° (Ley N° 19.738)", None, 518, "+"),
+    ("20", "Reintegro Impuesto Timbres y Estampillas, Art 3° Ley N° 20.259", None, 713, "+"),
+    ("21", "Adiciones al Débito por IEPD Ley 20.765", None, 741, "+"),
+    ("22", "Restitución Adicional Reembolso Remanente CF IVA (Ley 21.256)", None, 791, "+"),
+    ("23", "TOTAL DÉBITOS", None, 538, "="),
+]
+
+CREDITOS_SIN_DERECHO = [
+    ("25", "Internas Afectas", 564, 521, ""),
+    ("26", "Importaciones", 566, 560, ""),
+    ("27", "Internas exentas, o no gravadas", 584, 562, ""),
+]
+
+CREDITOS_CON_DERECHO = [
+    ("28", "Facturas recibidas del giro y Facturas de compras emitidas", 519, 520, "+"),
+    ("29", "Facturas recibidas de Proveedores: Supermercados y Comercios similares (Ley Nº20.780)", 761, 762, "+"),
+    ("30", "Facturas recibidas por Adquisición o Construcción de Bienes Inmuebles (Ley Nº20.780)", 765, 766, "+"),
+    ("31", "Facturas activo fijo", 524, 525, "+"),
+    ("32", "Notas de Crédito recibidas y NC emitidas por retención de cambio de sujeto", 527, 528, "-"),
+    ("33", "Notas de Débito recibidas y ND emitidas por retención de cambio de sujeto", 531, 532, "+"),
+]
+
+CREDITOS_IMPORTACIONES = [
+    ("34", "Declaraciones de Ingreso (DIN) importaciones del giro", 534, 535, "+"),
+    ("35", "Declaraciones de Ingreso (DIN) importaciones activo fijo", 536, 553, "+"),
+]
+
+CREDITOS_REMANENTE = [
+    ("36", "Remanente Crédito Fiscal mes anterior", None, 504, "+"),
+    ("37", "Devolución Solicitud Art.36 (Exportadores)", None, 593, "-"),
+    ("38", "Devolución Solicitud Art.27 bis (Activo fijo)", None, 594, "-"),
+    ("39", "Certificado Imputación Art.27 bis (Activo fijo)", None, 592, "-"),
+    ("40", "Devolución Solicitud Art.3 (Cambio de sujeto)", None, 539, "-"),
+    ("41", "Devolución Solicitud Ley Nº 20.258 (Generadoras Eléctricas)", None, 718, "-"),
+    ("42", "Devolución Solicitud Reembolso Remanente de Crédito Fiscal IVA", None, 790, "-"),
+    ("43", "Monto Reintegrado por Devolución Indebida de Crédito Fiscal D.S. 348 (Exportadores)", None, 164, "+"),
+]
+
+CREDITOS_OTROS = [
+    ("46", "Crédito del Art.11 Ley 18.211 (Zona Franca de Extensión)", None, 523, "+"),
+    ("47", "Crédito por Impuesto de Timbres y Estampillas, Art. 3º Ley Nº 20.259", None, 712, "+"),
+    ("48", "Crédito por IVA restituido a aportantes sin domicilio ni residencia en Chile", None, 757, "+"),
+    ("49", "TOTAL CRÉDITOS", None, 537, "="),
+]
+
+RETENCIONES = [
+    ("59", "Retención Impuesto 1ra Categoría Art. 20 Nº2, según Art. 73 LIR", None, 50, "+"),
+    ("60", "Retención Impuesto Único a los Trabajadores, según Art. 74 Nº1 LIR", None, 48, "+"),
+    ("61", "Retención de Impuesto tasa 10% rentas Art. 42 Nº2, según Art. 74 Nº2 LIR", None, 151, "+"),
+    ("62", "Retención de Impuesto tasa 10% rentas Art. 48, según Art. 74 Nº3 LIR", None, 153, "+"),
+    ("63", "Retención 3% Art. 42 Nº1 (préstamo tasa 0%)", None, 49, "+"),
+    ("64", "Retención 3% Art. 42 Nº2 (préstamo tasa 0%)", None, 155, "+"),
+    ("65", "Retención a Suplementeros (tasa 0,5%)", None, 54, "+"),
+    ("66", "Retención por compra de productos mineros", None, 56, "+"),
+    ("67", "Retención seguros dotales (tasa 15%)", None, 588, "+"),
+    ("68", "Retención APV retiros (tasa 15%)", None, 589, "+"),
+]
+
+CAMBIO_SUJETO_AGENTE = [
+    ("118", "IVA total retenido a terceros (tasa Art.14 D.L. 825/74)", None, 39, "+"),
+    ("119", "IVA parcial retenido a terceros (según tasa)", None, 554, "+"),
+    ("120", "IVA Retenido por notas de crédito emitidas", None, 736, "-"),
+    ("121", "Retención del margen de comercialización", None, 597, "+"),
+    ("122", "Retención Anticipo de Cambio de Sujeto / Retención Cambio de Sujeto", None, 596, "+"),
+]
+
+TOTALES_FINAL = [
+    ("147", "TOTAL A PAGAR DENTRO DEL PLAZO LEGAL", None, 91, "="),
+    ("148", "Más IPC", None, 92, "+"),
+    ("149", "Más Intereses y multas", None, 93, "+"),
+    ("150", "TOTAL A PAGAR CON RECARGO", None, 94, "="),
+]
 
 
 # ============================================================
@@ -225,16 +254,31 @@ def get_doc_values(doc, seccion, linea_key):
 
 def calcular_f29(datos):
     """
-    Calcula todos los códigos del F29.
-    Si hay documentos individuales en datos["documentos"], los totales se
-    recalculan desde ellos. Si no, usa datos["ventas"]/datos["compras"].
+    Calcula códigos del F29.
+    Si datos tiene "codigos", los usa directamente.
+    Si no, calcula desde ventas/compras/documentos.
     """
+    if "codigos" in datos:
+        codigos = dict(datos["codigos"])
+        # Asegurar que existan los códigos básicos
+        codigos.setdefault(538, 0)
+        codigos.setdefault(537, 0)
+        codigos.setdefault(89, 0)
+        codigos.setdefault(77, 0)
+        codigos.setdefault(595, 0)
+        codigos.setdefault(547, 0)
+        codigos.setdefault(91, 0)
+        codigos.setdefault(62, 0)
+        return codigos
+
+    # Cálculo desde datos desagregados (compatibilidad v2)
     v = datos.get("ventas", {})
     c = datos.get("compras", {})
     ret = datos.get("retenciones", {})
     ppm = datos.get("ppm", {})
     dev = datos.get("devoluciones", {})
     docs = datos.get("documentos", {})
+    cs = datos.get("cambio_sujeto", {})
 
     IVA_TASA = 0.19
     codigos = {}
@@ -249,143 +293,103 @@ def calcular_f29(datos):
         return sum(d.get(campo, 0) for d in docs.get(lk, []))
 
     # === DÉBITOS ===
+    for cq, ca, lk, fallback_cant, fallback_neto, is_iva in [
+        (585, 20, "linea_1", "facturas_exportacion_cant", "facturas_exportacion_neto", False),
+        (586, 142, "linea_2", "facturas_exentas_giro_cant", "facturas_exentas_giro_neto", False),
+        (515, 587, "linea_5", "facturas_compra_digital_cant", "facturas_compra_digital_neto", False),
+        (503, 502, "linea_7", "facturas_afectas_cant", "facturas_afectas_neto", True),
+        (716, 717, "linea_9", "ventas_activo_fijo_cant", "ventas_activo_fijo_neto", True),
+        (110, 111, "linea_10", "boletas_cant", "boletas_neto", True),
+        (512, 513, "linea_12", "notas_debito_cant", "notas_debito_neto", True),
+        (509, 510, "linea_13", "notas_credito_cant", "notas_credito_neto", True),
+    ]:
+        if has_docs(lk):
+            codigos[cq] = count_docs(lk)
+            if is_iva:
+                iva_sum = sum_field(lk, "iva")
+                codigos[ca] = iva_sum if iva_sum else int(sum_field(lk, "neto") * IVA_TASA)
+            else:
+                codigos[ca] = sum_field(lk, "neto")
+        else:
+            codigos[cq] = v.get(fallback_cant, c.get(fallback_cant, 0))
+            if is_iva:
+                codigos[ca] = int(v.get(fallback_neto, 0) * IVA_TASA)
+            else:
+                codigos[ca] = v.get(fallback_neto, c.get(fallback_neto, 0))
 
-    if has_docs("linea_1"):
-        codigos[585] = count_docs("linea_1")
-        codigos[20] = sum_field("linea_1", "neto")
-    else:
-        codigos[585] = v.get("facturas_exportacion_cant", 0)
-        codigos[20] = v.get("facturas_exportacion_neto", 0)
+    codigos.setdefault(731, 0); codigos.setdefault(732, 0)
+    codigos.setdefault(714, 0); codigos.setdefault(715, 0)
+    codigos.setdefault(720, 0)
+    codigos.setdefault(763, 0); codigos.setdefault(764, 0)
+    codigos.setdefault(758, 0); codigos.setdefault(759, 0)
+    codigos.setdefault(708, 0); codigos.setdefault(709, 0)
+    codigos.setdefault(733, 0); codigos.setdefault(734, 0)
+    codigos.setdefault(516, 0); codigos.setdefault(517, 0)
+    codigos.setdefault(500, 0); codigos.setdefault(501, 0)
+    codigos.setdefault(154, 0); codigos.setdefault(518, 0)
+    codigos.setdefault(713, 0); codigos.setdefault(741, 0)
+    codigos.setdefault(791, 0)
 
-    if has_docs("linea_2"):
-        codigos[586] = count_docs("linea_2")
-        codigos[142] = sum_field("linea_2", "neto")
-    else:
-        codigos[586] = v.get("facturas_exentas_giro_cant", 0)
-        codigos[142] = v.get("facturas_exentas_giro_neto", 0)
-
-    if has_docs("linea_5"):
-        codigos[515] = count_docs("linea_5")
-        codigos[587] = sum_field("linea_5", "neto")
-    else:
-        codigos[515] = c.get("facturas_compra_digital_cant", 0)
-        codigos[587] = c.get("facturas_compra_digital_neto", 0)
-
-    if has_docs("linea_7"):
-        codigos[503] = count_docs("linea_7")
-        iva_sum = sum_field("linea_7", "iva")
-        codigos[502] = iva_sum if iva_sum else int(sum_field("linea_7", "neto") * IVA_TASA)
-    else:
-        codigos[503] = v.get("facturas_afectas_cant", 0)
-        codigos[502] = int(v.get("facturas_afectas_neto", 0) * IVA_TASA)
-
-    if has_docs("linea_9"):
-        codigos[716] = count_docs("linea_9")
-        iva_sum = sum_field("linea_9", "iva")
-        codigos[717] = iva_sum if iva_sum else int(sum_field("linea_9", "neto") * IVA_TASA)
-    else:
-        codigos[716] = v.get("ventas_activo_fijo_cant", 0)
-        codigos[717] = int(v.get("ventas_activo_fijo_neto", 0) * IVA_TASA)
-
-    if has_docs("linea_10"):
-        codigos[110] = count_docs("linea_10")
-        iva_sum = sum_field("linea_10", "iva")
-        codigos[111] = iva_sum if iva_sum else int(sum_field("linea_10", "neto") * IVA_TASA)
-    else:
-        codigos[110] = v.get("boletas_cant", 0)
-        codigos[111] = int(v.get("boletas_neto", 0) * IVA_TASA)
-
-    if has_docs("linea_12"):
-        codigos[512] = count_docs("linea_12")
-        iva_sum = sum_field("linea_12", "iva")
-        codigos[513] = iva_sum if iva_sum else int(sum_field("linea_12", "neto") * IVA_TASA)
-    else:
-        codigos[512] = v.get("notas_debito_cant", 0)
-        codigos[513] = int(v.get("notas_debito_neto", 0) * IVA_TASA)
-
-    if has_docs("linea_13"):
-        codigos[509] = count_docs("linea_13")
-        iva_sum = sum_field("linea_13", "iva")
-        codigos[510] = iva_sum if iva_sum else int(sum_field("linea_13", "neto") * IVA_TASA)
-    else:
-        codigos[509] = v.get("notas_credito_cant", 0)
-        codigos[510] = int(v.get("notas_credito_neto", 0) * IVA_TASA)
-
-    total_debito = codigos[502] + codigos[717] + codigos[111] + codigos[513] - codigos[510]
+    total_debito = (
+        codigos.get(502, 0) + codigos.get(764, 0) + codigos.get(717, 0)
+        + codigos.get(111, 0) + codigos.get(759, 0)
+        + codigos.get(513, 0) - codigos.get(510, 0)
+        - codigos.get(709, 0) - codigos.get(734, 0)
+        + codigos.get(517, 0) + codigos.get(501, 0)
+        + codigos.get(154, 0) + codigos.get(518, 0)
+        + codigos.get(713, 0) + codigos.get(741, 0) + codigos.get(791, 0)
+    )
     codigos[538] = total_debito
 
     # === CRÉDITOS ===
+    for cq, ca, lk, fallback_cant, fallback_iva in [
+        (519, 520, "linea_28", "facturas_giro_cant", "facturas_giro_iva"),
+        (524, 525, "linea_31", "facturas_activo_fijo_cant", "facturas_activo_fijo_iva"),
+        (527, 528, "linea_32", "notas_credito_recibidas_cant", "notas_credito_recibidas_iva"),
+        (531, 532, "linea_33", "notas_debito_recibidas_cant", "notas_debito_recibidas_iva"),
+        (534, 535, "linea_34", "din_giro_cant", "din_giro_iva"),
+        (536, 553, "linea_35", "din_activo_fijo_cant", "din_activo_fijo_iva"),
+    ]:
+        if has_docs(lk):
+            codigos[cq] = count_docs(lk)
+            codigos[ca] = sum_field(lk, "iva")
+        else:
+            codigos[cq] = c.get(fallback_cant, 0)
+            codigos[ca] = c.get(fallback_iva, 0)
 
-    if has_docs("linea_28"):
-        codigos[519] = count_docs("linea_28")
-        codigos[520] = sum_field("linea_28", "iva")
-    else:
-        codigos[519] = c.get("facturas_giro_cant", 0)
-        codigos[520] = c.get("facturas_giro_iva", 0)
+    codigos.setdefault(761, 0); codigos.setdefault(762, 0)
+    codigos.setdefault(765, 0); codigos.setdefault(766, 0)
+    codigos.setdefault(564, 0); codigos.setdefault(521, 0)
+    codigos.setdefault(566, 0); codigos.setdefault(560, 0)
+    codigos.setdefault(584, c.get("exentas_sin_derecho_cant", 0))
+    codigos.setdefault(562, c.get("exentas_sin_derecho_neto", 0))
 
-    if has_docs("linea_31"):
-        codigos[524] = count_docs("linea_31")
-        codigos[525] = sum_field("linea_31", "iva")
-    else:
-        codigos[524] = c.get("facturas_activo_fijo_cant", 0)
-        codigos[525] = c.get("facturas_activo_fijo_iva", 0)
-
-    if has_docs("linea_32"):
-        codigos[527] = count_docs("linea_32")
-        codigos[528] = sum_field("linea_32", "iva")
-    else:
-        codigos[527] = c.get("notas_credito_recibidas_cant", 0)
-        codigos[528] = c.get("notas_credito_recibidas_iva", 0)
-
-    if has_docs("linea_33"):
-        codigos[531] = count_docs("linea_33")
-        codigos[532] = sum_field("linea_33", "iva")
-    else:
-        codigos[531] = c.get("notas_debito_recibidas_cant", 0)
-        codigos[532] = c.get("notas_debito_recibidas_iva", 0)
-
-    if has_docs("linea_34"):
-        codigos[534] = count_docs("linea_34")
-        codigos[535] = sum_field("linea_34", "iva")
-    else:
-        codigos[534] = c.get("din_giro_cant", 0)
-        codigos[535] = c.get("din_giro_iva", 0)
-
-    if has_docs("linea_35"):
-        codigos[536] = count_docs("linea_35")
-        codigos[553] = sum_field("linea_35", "iva")
-    else:
-        codigos[536] = c.get("din_activo_fijo_cant", 0)
-        codigos[553] = c.get("din_activo_fijo_iva", 0)
-
-    codigos[511] = codigos[519] + codigos[524]
-    codigos[514] = codigos[520] + codigos[525]
-    codigos[564] = c.get("compras_sin_credito_cant", 0)
-    codigos[521] = c.get("compras_sin_credito_neto", 0)
+    codigos[511] = codigos.get(519, 0) + codigos.get(524, 0)
+    codigos[514] = codigos.get(520, 0) + codigos.get(525, 0)
 
     codigos[504] = datos.get("remanente_anterior", 0)
     codigos[593] = dev.get("art_36_exportador", 0)
     codigos[594] = dev.get("art_27_bis", 0)
     codigos[592] = dev.get("certificado_27_bis", 0)
     codigos[539] = dev.get("cambio_sujeto", 0)
-
-    iva_digital = int(codigos[587] * IVA_TASA)
+    codigos.setdefault(718, 0); codigos.setdefault(790, 0)
+    codigos.setdefault(164, 0)
+    codigos.setdefault(523, 0); codigos.setdefault(712, 0); codigos.setdefault(757, 0)
 
     total_credito = (
-        codigos[520] + codigos[525]
-        - codigos[528] + codigos[532]
-        + codigos[535] + codigos[553]
+        codigos.get(520, 0) + codigos.get(762, 0) + codigos.get(766, 0)
+        + codigos.get(525, 0)
+        - codigos.get(528, 0) + codigos.get(532, 0)
+        + codigos.get(535, 0) + codigos.get(553, 0)
         + codigos[504]
         - codigos[593] - codigos[594] - codigos[592] - codigos[539]
-        + iva_digital
+        - codigos.get(718, 0) - codigos.get(790, 0)
+        + codigos.get(164, 0)
+        + codigos.get(523, 0) + codigos.get(712, 0) + codigos.get(757, 0)
     )
     codigos[537] = total_credito
 
-    if iva_digital > 0:
-        codigos[538] = total_debito + iva_digital
-        total_debito = codigos[538]
-
-    # === DETERMINACIÓN IVA ===
+    # === IVA DETERMINADO ===
     if total_debito > total_credito:
         codigos[89] = total_debito - total_credito
         codigos[77] = 0
@@ -394,30 +398,32 @@ def calcular_f29(datos):
         codigos[77] = total_credito - total_debito
 
     # === RETENCIONES ===
+    codigos.setdefault(50, 0)
     if has_docs("linea_60"):
         codigos[48] = sum(d.get("iusc", d.get("iva", 0)) for d in docs["linea_60"])
     else:
         codigos[48] = ret.get("iusc_impuesto", 0)
-
     if has_docs("linea_61"):
         codigos[151] = sum(d.get("retencion", d.get("iva", 0)) for d in docs["linea_61"])
     else:
         codigos[151] = ret.get("honorarios_retencion", 0)
-
     codigos[153] = ret.get("directores_retencion", 0)
+    for c_code in [49, 155, 54, 56, 588, 589]:
+        codigos.setdefault(c_code, 0)
 
     # === PPM ===
     tasa_ppm = ppm.get("tasa", 0.25)
     codigos[115] = tasa_ppm
+    codigos.setdefault(750, 0)
+    codigos.setdefault(30, 0)
 
     if ppm.get("base_imponible") is not None:
         base_ppm = ppm["base_imponible"]
     else:
-        def neto_linea(lk, fallback_key):
+        def neto_linea(lk, fk):
             if has_docs(lk):
                 return sum_field(lk, "neto")
-            return v.get(fallback_key, 0)
-
+            return v.get(fk, 0)
         base_ppm = (
             neto_linea("linea_7", "facturas_afectas_neto")
             + neto_linea("linea_2", "facturas_exentas_giro_neto")
@@ -427,644 +433,546 @@ def calcular_f29(datos):
             - neto_linea("linea_13", "notas_credito_neto")
         )
     codigos[563] = base_ppm
+    codigos[68] = 0
 
     if ppm.get("suspension", False):
         codigos[750] = 1
         codigos[62] = 0
     else:
-        codigos[750] = 0
         codigos[62] = int(base_ppm * tasa_ppm / 100)
 
     codigos[722] = ppm.get("remanente_sence_anterior", 0)
     codigos[721] = ppm.get("credito_sence", 0)
-    credito_sence_disponible = codigos[721] + codigos[722]
-    sence_aplicado = min(credito_sence_disponible, codigos[62])
-    codigos[723] = sence_aplicado
-    codigos[724] = credito_sence_disponible - sence_aplicado
+    sence_disponible = codigos[721] + codigos[722]
+    codigos[723] = min(sence_disponible, codigos[62])
+    codigos[724] = sence_disponible - codigos[723]
 
     ppm_neto = codigos[62] - codigos[723]
 
+    # === SUB TOTAL (línea 80) ===
+    codigos[595] = (
+        codigos[89] + codigos.get(48, 0) + codigos.get(151, 0)
+        + codigos.get(153, 0) + ppm_neto
+    )
+
+    # === CAMBIO DE SUJETO ===
+    codigos[39] = cs.get("iva_retenido_total", cs.get(39, 0))
+    codigos[554] = cs.get("iva_parcial_retenido", cs.get(554, 0))
+    codigos[736] = cs.get("iva_retenido_nc", cs.get(736, 0))
+    codigos[597] = cs.get("retencion_margen", cs.get(597, 0))
+    codigos[596] = cs.get("retencion_neta", cs.get(596, 0))
+    if codigos[596] == 0 and codigos[39] > 0:
+        codigos[596] = codigos[39] + codigos.get(554, 0) - codigos[736] + codigos.get(597, 0)
+
     # === TOTAL ===
-    codigos[595] = codigos[89] + codigos[48] + codigos[151] + codigos[153] + ppm_neto
-    codigos[91] = codigos[595]
+    codigos[547] = codigos[595] + codigos.get(596, 0)
+    codigos[91] = codigos[547]
     codigos[92] = 0
     codigos[93] = 0
-    codigos[94] = codigos[91]
+    codigos[94] = codigos[91] + codigos[92] + codigos[93]
 
     return codigos
 
 
 # ============================================================
-# Escritura del Excel
+# Hoja 1: Formulario F29
 # ============================================================
 
-def _write_section_header(ws, row, title):
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
-    cell = ws.cell(row=row, column=1, value=title)
-    cell.font = FONT_SECTION
-    cell.fill = FILL_SECTION
-    cell.alignment = ALIGN_LEFT
-    for col in range(1, 7):
-        ws.cell(row=row, column=col).fill = FILL_SECTION
-        ws.cell(row=row, column=col).border = BORDER_THIN
-    return row + 1
-
-
-def _write_col_headers(ws, row, headers):
-    for i, h in enumerate(headers, 1):
-        c = ws.cell(row=row, column=i, value=h)
-        c.font = Font(name="Arial", size=8, bold=True, color="333333")
-        c.fill = PatternFill(start_color=GRIS_HEADER, end_color=GRIS_HEADER, fill_type="solid")
-        c.alignment = ALIGN_CENTER
-        c.border = BORDER_THIN
-    return row + 1
-
-
-def _write_data_row(ws, row, linea, cod_cant, desc, cantidad, cod_monto, monto,
-                    is_total=False, is_calc=False):
-    fill = FILL_TOTAL if is_total else (FILL_CALC if is_calc else None)
-    font_val = FONT_TOTAL if is_total else FONT_NORMAL
-    for col, val, font, align in [
-        (1, linea, FONT_CODE, ALIGN_CENTER),
-        (2, cod_cant or "", FONT_SMALL, ALIGN_CENTER),
-        (3, desc, font_val, ALIGN_LEFT),
-        (4, cantidad if cantidad else "", FONT_NORMAL, ALIGN_RIGHT),
-        (5, cod_monto or "", FONT_SMALL, ALIGN_CENTER),
-        (6, formato_peso(monto) if monto is not None else "", font_val, ALIGN_RIGHT),
-    ]:
-        c = ws.cell(row=row, column=col, value=val)
-        c.font = font
-        c.alignment = align
-        c.border = BORDER_THIN
-        if fill:
-            c.fill = fill
-    return row + 1
-
-
-def _write_hoja_f29(wb, codigos, enc, datos):
-    """Hoja 1: Formulario F29 resumen."""
+def _write_f29(wb, codigos, enc):
+    """Hoja 1: Formulario F29 con estilo SII."""
     mes = enc.get("periodo_mes", 1)
     anio = enc.get("periodo_anio", 2026)
     nombre_mes = MESES.get(mes, str(mes))
-    docs = datos.get("documentos", {})
 
     ws = wb.active
     ws.title = f"F29 — {nombre_mes} {anio}"
-    ws.column_dimensions["A"].width = 8
-    ws.column_dimensions["B"].width = 10
-    ws.column_dimensions["C"].width = 52
-    ws.column_dimensions["D"].width = 14
-    ws.column_dimensions["E"].width = 10
-    ws.column_dimensions["F"].width = 20
 
-    row = 1
+    # Anchos de columna
+    ws.column_dimensions["A"].width = 5     # Línea
+    ws.column_dimensions["B"].width = 72    # Descripción
+    ws.column_dimensions["C"].width = 6     # Código cant
+    ws.column_dimensions["D"].width = 12    # Cantidad
+    ws.column_dimensions["E"].width = 6     # Código monto
+    ws.column_dimensions["F"].width = 18    # Monto
+    ws.column_dimensions["G"].width = 3     # Operador
 
-    # Encabezado principal
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
-    c = ws.cell(row=row, column=1,
-                value="FORMULARIO 29 — DECLARACIÓN MENSUAL Y PAGO SIMULTÁNEO DE IMPUESTOS")
-    c.font = FONT_HEADER; c.fill = FILL_HEADER; c.alignment = ALIGN_CENTER
-    for col in range(1, 7): ws.cell(row=row, column=col).fill = FILL_HEADER
-    row += 1
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
-    c = ws.cell(row=row, column=1, value="Servicio de Impuestos Internos — Chile")
-    c.font = Font(name="Arial", size=9, italic=True, color=BLANCO)
-    c.fill = FILL_HEADER; c.alignment = ALIGN_CENTER
-    for col in range(1, 7): ws.cell(row=row, column=col).fill = FILL_HEADER
-    row += 2
+    r = 1
 
-    for label, value in [
-        ("RUT:", enc.get("rut", "—")),
-        ("Razón Social:", enc.get("razon_social", "—")),
-        ("Período Tributario:", f"{mes:02d}-{anio}"),
-        ("Régimen:", enc.get("regimen", "—").replace("_", " ").title()),
-    ]:
-        ws.cell(row=row, column=1, value=label).font = FONT_CODE
-        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=3)
-        ws.cell(row=row, column=2, value=value).font = FONT_NORMAL
-        row += 1
-    row += 1
+    # === ENCABEZADO ===
+    r = _section(ws, r, "Impuestos Mensuales", F10B)
 
-    def dlabel(lk):
-        n = len(docs.get(lk, []))
-        return f" [{n} docs → hoja Detalle]" if n > 0 else ""
+    # Periodo / RUT / Folio
+    _c(ws, r, 1, "", F7, FILL_BLUE, AC)
+    _c(ws, r, 2, "Periodo Tributario", F8B, FILL_BLUE, AC)
+    ws.merge_cells(start_row=r, start_column=3, end_row=r, end_column=4)
+    _c(ws, r, 3, "Rol Único Tributario", F8B, FILL_BLUE, AC)
+    ws.cell(row=r, column=4).fill = FILL_BLUE
+    ws.cell(row=r, column=4).border = BORDER
+    ws.merge_cells(start_row=r, start_column=5, end_row=r, end_column=6)
+    _c(ws, r, 5, "Folio", F8B, FILL_BLUE, AC)
+    ws.cell(row=r, column=6).fill = FILL_BLUE
+    ws.cell(row=r, column=6).border = BORDER
+    _c(ws, r, 7, "", F7, FILL_BLUE, AC)
+    r += 1
 
-    # DÉBITO
-    row = _write_section_header(ws, row, "DÉBITO FISCAL — Ventas y Servicios (Líneas 1–23)")
-    row = _write_col_headers(ws, row, ["Línea", "Cód.", "Descripción", "Cant.", "Cód.", "Monto ($)"])
-    for li, cc, desc, cant, cm, monto in [
-        ("1",  "585", f"Exportaciones{dlabel('linea_1')}", codigos[585], "20", codigos[20]),
-        ("2",  "586", f"Ventas/servicios exentos{dlabel('linea_2')}", codigos[586], "142", codigos[142]),
-        ("5",  "515", f"FC serv. digitales extranjeros{dlabel('linea_5')}", codigos[515], "587", codigos[587]),
-        ("7",  "503", f"⭐ Facturas afectas del giro{dlabel('linea_7')}", codigos[503], "502", codigos[502]),
-        ("9",  "716", f"Ventas activo fijo{dlabel('linea_9')}", codigos[716], "717", codigos[717]),
-        ("10", "110", f"Boletas{dlabel('linea_10')}", codigos[110], "111", codigos[111]),
-        ("12", "512", f"Notas de débito emitidas{dlabel('linea_12')}", codigos[512], "513", codigos[513]),
-        ("13", "509", f"(-) Notas de crédito emitidas{dlabel('linea_13')}", codigos[509], "510", -codigos[510] if codigos[510] else 0),
-        ("23", "",    "TOTAL DÉBITOS", "", "538", codigos[538]),
-    ]:
-        row = _write_data_row(ws, row, li, cc, desc, cant, cm, monto,
-                              is_total=(li == "23"), is_calc=(li == "23"))
-    row += 1
+    _c(ws, r, 1, "", F7, FILL_WHITE, AC)
+    _c(ws, r, 2, f"Mes: {mes}  —  Año: {anio}", F8, FILL_LGRAY, AC)
+    ws.merge_cells(start_row=r, start_column=3, end_row=r, end_column=4)
+    _c(ws, r, 3, enc.get("rut", ""), F8, FILL_LGRAY, AC)
+    ws.cell(row=r, column=4).fill = FILL_LGRAY
+    ws.cell(row=r, column=4).border = BORDER
+    ws.merge_cells(start_row=r, start_column=5, end_row=r, end_column=6)
+    _c(ws, r, 5, enc.get("folio", ""), F8, FILL_LGRAY, AC)
+    ws.cell(row=r, column=6).fill = FILL_LGRAY
+    ws.cell(row=r, column=6).border = BORDER
+    _c(ws, r, 7, "", F7, FILL_WHITE, AC)
+    r += 1
 
-    # CRÉDITO
-    row = _write_section_header(ws, row, "CRÉDITO FISCAL — Compras y Gastos (Líneas 24–49)")
-    row = _write_col_headers(ws, row, ["Línea", "Cód.", "Descripción", "Cant.", "Cód.", "Monto ($)"])
-    for li, cc, desc, cant, cm, monto in [
-        ("24", "511", "[Info] IVA total DTE recibidos", codigos[511], "514", codigos[514]),
-        ("28", "519", f"⭐ Facturas recibidas del giro{dlabel('linea_28')}", codigos[519], "520", codigos[520]),
-        ("31", "524", f"⭐ Facturas activo fijo{dlabel('linea_31')}", codigos[524], "525", codigos[525]),
-        ("32", "527", f"(-) NC recibidas{dlabel('linea_32')}", codigos[527], "528", -codigos[528] if codigos[528] else 0),
-        ("33", "531", f"ND recibidas{dlabel('linea_33')}", codigos[531], "532", codigos[532]),
-        ("34", "534", f"DIN importaciones giro{dlabel('linea_34')}", codigos[534], "535", codigos[535]),
-        ("35", "536", f"DIN importaciones activo fijo{dlabel('linea_35')}", codigos[536], "553", codigos[553]),
-        ("36", "",    "Remanente CF mes anterior", "", "504", codigos[504]),
-        ("37", "",    "(-) Devolución Art. 36 exportador", "", "593", -codigos[593] if codigos[593] else 0),
-        ("38", "",    "(-) Devolución Art. 27 bis", "", "594", -codigos[594] if codigos[594] else 0),
-        ("49", "",    "TOTAL CRÉDITOS", "", "537", codigos[537]),
-    ]:
-        row = _write_data_row(ws, row, li, cc, desc, cant, cm, monto,
-                              is_total=(li == "49"), is_calc=(li == "49"))
-    row += 1
+    r = _section(ws, r, f"Razón Social: {enc.get('razon_social', '')}", F8B)
+    r += 0  # no extra space
 
-    # IVA
-    row = _write_section_header(ws, row, "DETERMINACIÓN DEL IVA (Línea 50)")
-    row = _write_col_headers(ws, row, ["Línea", "Cód.", "Descripción", "", "Cód.", "Monto ($)"])
-    if codigos[89] > 0:
-        row = _write_data_row(ws, row, "50", "", "IVA DETERMINADO (a pagar)", "", "89", codigos[89], is_calc=True)
+    # === DÉBITOS Y VENTAS ===
+    r = _section(ws, r, "DÉBITOS y VENTAS")
+    r = _section(ws, r, "Ventas y/o Servicios Prestados", F8B)
+    r = _section(ws, r, "INFORMACIÓN DE INGRESOS", F8B)
+    r = _colhdr(ws, r, "Cantidad de documentos", "Monto Neto")
+
+    for num, desc, cq, ca, op in DEBITOS_INFO:
+        cv = codigos.get(cq) if cq else None
+        av = codigos.get(ca) if ca else None
+        r = _line(ws, r, num, desc, cq, cv, ca, av, op)
+
+    r = _section(ws, r, "Genera Débito", F8B)
+    r = _colhdr(ws, r, "Cantidad de documentos", "Débitos")
+
+    for num, desc, cq, ca, op in DEBITOS_GENERA:
+        cv = codigos.get(cq) if cq else None
+        av = codigos.get(ca) if ca else None
+        is_total = (num == "23")
+        r = _line(ws, r, num, desc, cq, cv, ca, av, op, total=is_total)
+
+    # === CRÉDITOS Y COMPRAS ===
+    r = _section(ws, r, "CRÉDITOS Y COMPRAS")
+    r = _section(ws, r, "COMPRAS Y/O SERVICIOS UTILIZADOS", F8B)
+
+    # Línea 24 informativa
+    r = _colhdr(ws, r, "Con derecho a Crédito", "Sin derecho a Crédito")
+    r = _line(ws, r, "24", "IVA por documentos electrónicos recibidos",
+              511, codigos.get(511), 514, codigos.get(514), "")
+
+    # Sin derecho a CF
+    r = _section(ws, r, "SIN DERECHO A CRÉDITO FISCAL", F8B)
+    r = _colhdr(ws, r, "Cantidad de documentos", "Monto Neto")
+    for num, desc, cq, ca, op in CREDITOS_SIN_DERECHO:
+        cv = codigos.get(cq) if cq else None
+        av = codigos.get(ca) if ca else None
+        r = _line(ws, r, num, desc, cq, cv, ca, av, op)
+
+    # Con derecho a CF - Internas
+    r = _section(ws, r, "CON DERECHO A CRÉDITO FISCAL — INTERNAS", F8B)
+    r = _colhdr(ws, r, "Cantidad de documentos", "Crédito, Recuperación y Reintegro")
+    for num, desc, cq, ca, op in CREDITOS_CON_DERECHO:
+        cv = codigos.get(cq) if cq else None
+        av = codigos.get(ca) if ca else None
+        r = _line(ws, r, num, desc, cq, cv, ca, av, op)
+
+    # Importaciones
+    r = _section(ws, r, "IMPORTACIONES", F8B)
+    for num, desc, cq, ca, op in CREDITOS_IMPORTACIONES:
+        cv = codigos.get(cq) if cq else None
+        av = codigos.get(ca) if ca else None
+        r = _line(ws, r, num, desc, cq, cv, ca, av, op)
+
+    # Remanente y devoluciones
+    for num, desc, cq, ca, op in CREDITOS_REMANENTE:
+        cv = codigos.get(cq) if cq else None
+        av = codigos.get(ca) if ca else None
+        r = _line(ws, r, num, desc, cq, cv, ca, av, op)
+
+    # Otros créditos
+    for num, desc, cq, ca, op in CREDITOS_OTROS:
+        cv = codigos.get(cq) if cq else None
+        av = codigos.get(ca) if ca else None
+        is_total = (num == "49")
+        r = _line(ws, r, num, desc, cq, cv, ca, av, op, total=is_total)
+
+    # === POSTERGACIÓN DE IVA / IVA DETERMINADO ===
+    r = _section(ws, r, "POSTERGACIÓN DE IVA (Ley 20.780) — IMPUESTO DETERMINADO", F8B)
+    rem77 = codigos.get(77, 0)
+    iva89 = codigos.get(89, 0)
+    if rem77 > 0:
+        r = _line(ws, r, "50", f"Remanente de crédito fiscal para el período siguiente",
+                  None, None, 77, rem77, "")
+    if iva89 > 0:
+        r = _line(ws, r, "50", f"IVA determinado",
+                  None, None, 89, iva89, "+", total=True)
+    if rem77 == 0 and iva89 == 0:
+        r = _line(ws, r, "50", "Sin IVA determinado ni remanente", None, None, 89, 0, "+")
+
+    # === RETENCIONES ===
+    r = _section(ws, r, "IMPUESTO A LA RENTA D.L. 824/74")
+    r = _section(ws, r, "RETENCIONES", F8B)
+    for num, desc, cq, ca, op in RETENCIONES:
+        cv = codigos.get(cq) if cq else None
+        av = codigos.get(ca) if ca else None
+        r = _line(ws, r, num, desc, cq, cv, ca, av, op)
+
+    # === PPM ===
+    r = _section(ws, r, "PPM", F8B)
+    base = codigos.get(563, 0)
+    tasa = codigos.get(115, 0)
+    ppm_val = codigos.get(62, 0)
+    ppm_desc = f"1ra Categoría Art. 84 a)  |  Base Imponible: {fmt(base)}  |  Tasa: {tasa}%"
+    r = _line(ws, r, "69", ppm_desc, None, None, 62, ppm_val, "+")
+
+    # Crédito SENCE
+    sence = codigos.get(723, 0)
+    if sence > 0:
+        r = _line(ws, r, "75", "Crédito Capacitación a Imputar", None, None, 723, sence, "-")
+
+    # SUB TOTAL
+    r = _line(ws, r, "80",
+              "SUB TOTAL IMPUESTO DETERMINADO ANVERSO (Suma líneas 49 a 64)",
+              None, None, 595, codigos.get(595, 0), "=", total=True)
+
+    # === CAMBIO DE SUJETO ===
+    cs_total = codigos.get(596, 0)
+    if cs_total > 0 or codigos.get(39, 0) > 0:
+        r = _section(ws, r, "CAMBIO DE SUJETO D.L. 825")
+        r = _section(ws, r, "CAMBIO DE SUJETO (AGENTE RETENEDOR)", F8B)
+        for num, desc, cq, ca, op in CAMBIO_SUJETO_AGENTE:
+            cv = codigos.get(cq) if cq else None
+            av = codigos.get(ca) if ca else None
+            is_total = (num == "122")
+            r = _line(ws, r, num, desc, cq, cv, ca, av, op, total=is_total)
+
+    # === TOTAL DETERMINADO ===
+    r = _line(ws, r, "140", "Total Determinado", None, None, 547,
+              codigos.get(547, 0), "=", total=True)
+
+    # === TOTAL A PAGAR ===
+    for num, desc, cq, ca, op in TOTALES_FINAL:
+        cv = codigos.get(cq) if cq else None
+        av = codigos.get(ca) if ca else None
+        is_total = (num in ("147", "150"))
+        r = _line(ws, r, num, desc, cq, cv, ca, av, op, total=is_total)
+
+
+# ============================================================
+# Hoja 2: Detalle de documentos
+# ============================================================
+
+LINEAS_INFO = {
+    "linea_1":  {"linea": "1",  "codigo": "585/20",  "nombre": "Facturas de Exportación", "seccion": "debito"},
+    "linea_2":  {"linea": "2",  "codigo": "586/142", "nombre": "Ventas/Servicios Exentos del Giro", "seccion": "debito"},
+    "linea_5":  {"linea": "5",  "codigo": "515/587", "nombre": "Facturas de Compra (Serv. Digitales Extranjeros)", "seccion": "debito"},
+    "linea_7":  {"linea": "7",  "codigo": "503/502", "nombre": "Facturas Afectas del Giro", "seccion": "debito"},
+    "linea_9":  {"linea": "9",  "codigo": "716/717", "nombre": "Ventas Activo Fijo (No del Giro)", "seccion": "debito"},
+    "linea_10": {"linea": "10", "codigo": "110/111", "nombre": "Boletas", "seccion": "debito"},
+    "linea_11": {"linea": "11", "codigo": "758/759", "nombre": "Boletas Electrónicas / POS", "seccion": "debito"},
+    "linea_12": {"linea": "12", "codigo": "512/513", "nombre": "Notas de Débito Emitidas", "seccion": "debito"},
+    "linea_13": {"linea": "13", "codigo": "509/510", "nombre": "Notas de Crédito Emitidas", "seccion": "debito"},
+    "linea_28": {"linea": "28", "codigo": "519/520", "nombre": "Facturas Recibidas del Giro + FC Emitidas", "seccion": "credito"},
+    "linea_29": {"linea": "29", "codigo": "761/762", "nombre": "Facturas Supermercados/Comercios", "seccion": "credito"},
+    "linea_31": {"linea": "31", "codigo": "524/525", "nombre": "Facturas Activo Fijo", "seccion": "credito"},
+    "linea_32": {"linea": "32", "codigo": "527/528", "nombre": "Notas de Crédito Recibidas", "seccion": "credito"},
+    "linea_33": {"linea": "33", "codigo": "531/532", "nombre": "Notas de Débito Recibidas", "seccion": "credito"},
+    "linea_60": {"linea": "60", "codigo": "48",      "nombre": "Impuesto Único 2da Categoría (Sueldos)", "seccion": "retencion"},
+    "linea_61": {"linea": "61", "codigo": "151",     "nombre": "Retención Honorarios Art. 42 N°2", "seccion": "retencion"},
+}
+
+COLUMNAS_VENTAS = ["N° Doc", "Fecha", "RUT", "Razón Social", "Descripción", "Neto", "IVA", "Exento", "Total"]
+COLUMNAS_COMPRAS = ["N° Doc", "Fecha", "RUT", "Razón Social", "Descripción", "Neto", "IVA", "Total"]
+COLUMNAS_HONORARIOS = ["N° Boleta", "Fecha", "RUT", "Razón Social", "Descripción", "Bruto", "Retención", "Líquido"]
+COLUMNAS_SUELDOS = ["N° Liquidación", "Fecha", "RUT", "Nombre", "Cargo", "Sueldo Bruto", "IUSC", "Líquido"]
+
+
+def _get_columnas(seccion, lk):
+    if lk == "linea_61":
+        return COLUMNAS_HONORARIOS
+    elif lk == "linea_60":
+        return COLUMNAS_SUELDOS
+    elif seccion == "debito":
+        return COLUMNAS_VENTAS
     else:
-        row = _write_data_row(ws, row, "50", "", "REMANENTE CF (para mes siguiente)", "", "77", codigos[77], is_calc=True)
-    row += 1
-
-    # RETENCIONES
-    row = _write_section_header(ws, row, "RETENCIONES DE IMPUESTO A LA RENTA (Líneas 59–68)")
-    row = _write_col_headers(ws, row, ["Línea", "Cód.", "Descripción", "", "Cód.", "Monto ($)"])
-    for li, cc, desc, cant, cm, monto in [
-        ("60", "", f"IUSC sueldos{dlabel('linea_60')}", "", "48", codigos[48]),
-        ("61", "", f"⭐ Retención honorarios 15,25%{dlabel('linea_61')}", "", "151", codigos[151]),
-        ("62", "", "Retención dietas directores", "", "153", codigos[153]),
-    ]:
-        row = _write_data_row(ws, row, li, cc, desc, cant, cm, monto)
-    row += 1
-
-    # PPM
-    row = _write_section_header(ws, row, "PPM (Líneas 69–78)")
-    row = _write_col_headers(ws, row, ["Línea", "Cód.", "Descripción", "", "Cód.", "Monto ($)"])
-    susp = " [SUSPENDIDO]" if codigos.get(750) == 1 else ""
-    for li, cc, desc, cant, cm, monto in [
-        ("69", "563", f"Base imponible PPM{susp}", "", "", codigos[563]),
-        ("69", "115", f"Tasa PPM: {codigos[115]}%", "", "", None),
-        ("69", "",    "PPM determinado", "", "62", codigos[62]),
-        ("75", "723", "(-) Crédito SENCE aplicado", "", "", -codigos[723] if codigos[723] else 0),
-    ]:
-        row = _write_data_row(ws, row, li, cc, desc, cant, cm, monto)
-    row += 1
-
-    # TOTAL
-    row = _write_section_header(ws, row, "TOTAL A PAGAR (Líneas 141–144)")
-    row = _write_col_headers(ws, row, ["Línea", "Cód.", "Descripción", "", "Cód.", "Monto ($)"])
-    for li, cc, desc, cant, cm, monto in [
-        ("80",  "", "Subtotal impuesto determinado", "", "595", codigos[595]),
-        ("141", "", "TOTAL A PAGAR EN PLAZO LEGAL", "", "91", codigos[91]),
-        ("142", "", "Más IPC (reajuste fuera de plazo)", "", "92", codigos[92]),
-        ("143", "", "Más intereses y multas", "", "93", codigos[93]),
-        ("144", "", "TOTAL A PAGAR CON RECARGO", "", "94", codigos[94]),
-    ]:
-        is_t = li in ("141", "144")
-        row = _write_data_row(ws, row, li, cc, desc, cant, cm, monto,
-                              is_total=is_t, is_calc=is_t)
+        return COLUMNAS_COMPRAS
 
 
-def _write_hoja_detalle_docs(wb, datos, codigos):
-    """Hoja 2: Detalle de documentos por cada línea del F29."""
+def _get_doc_values(doc, seccion, lk):
+    if lk == "linea_61":
+        return [doc.get("numero", ""), doc.get("fecha", ""), doc.get("rut", ""),
+                doc.get("razon_social", ""), doc.get("descripcion", ""),
+                doc.get("bruto", doc.get("neto", 0)), doc.get("retencion", doc.get("iva", 0)),
+                doc.get("liquido", doc.get("total", 0))]
+    elif lk == "linea_60":
+        return [doc.get("numero", ""), doc.get("fecha", ""), doc.get("rut", ""),
+                doc.get("razon_social", doc.get("nombre", "")),
+                doc.get("cargo", doc.get("descripcion", "")),
+                doc.get("bruto", doc.get("neto", 0)), doc.get("iusc", doc.get("iva", 0)),
+                doc.get("liquido", doc.get("total", 0))]
+    elif seccion == "debito":
+        return [doc.get("numero", ""), doc.get("fecha", ""), doc.get("rut", ""),
+                doc.get("razon_social", ""), doc.get("descripcion", ""),
+                doc.get("neto", 0), doc.get("iva", 0), doc.get("exento", 0),
+                doc.get("total", 0)]
+    else:
+        return [doc.get("numero", ""), doc.get("fecha", ""), doc.get("rut", ""),
+                doc.get("razon_social", ""), doc.get("descripcion", ""),
+                doc.get("neto", 0), doc.get("iva", 0), doc.get("total", 0)]
+
+
+def _write_detalle(wb, datos):
+    """Hoja 2: Detalle de documentos por línea."""
     docs = datos.get("documentos", {})
     if not docs:
         ws = wb.create_sheet(title="Detalle Documentos")
-        ws.cell(row=1, column=1, value="Sin documentos individuales. Se usaron totales agregados.").font = FONT_SECTION
+        _c(ws, 1, 1, "Sin documentos individuales. Se usaron totales agregados.", F8B, FILL_WHITE, AL)
         return
 
     ws = wb.create_sheet(title="Detalle Documentos")
-    for i, w in enumerate([4, 14, 12, 16, 28, 28, 16, 16, 16, 16], 1):
+    for i, w in enumerate([4, 14, 12, 20, 30, 30, 14, 14, 14, 14], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
-    row = 1
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
-    c = ws.cell(row=row, column=1, value="DETALLE DE DOCUMENTOS POR LÍNEA DEL F29")
-    c.font = FONT_HEADER; c.fill = FILL_HEADER; c.alignment = ALIGN_CENTER
-    for col in range(1, 11): ws.cell(row=row, column=col).fill = FILL_HEADER
-    row += 2
+    r = 1
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=10)
+    cell = ws.cell(row=r, column=1, value="DETALLE DE DOCUMENTOS POR LÍNEA DEL F29")
+    cell.font = F10B
+    cell.fill = FILL_BLUE
+    cell.alignment = AC
+    for c in range(1, 11):
+        ws.cell(row=r, column=c).fill = FILL_BLUE
+        ws.cell(row=r, column=c).border = BORDER
+    r += 2
 
-    orden_lineas = [
+    orden = [
         "linea_1", "linea_2", "linea_5", "linea_7", "linea_9",
         "linea_10", "linea_11", "linea_12", "linea_13",
         "linea_28", "linea_29", "linea_31", "linea_32", "linea_33",
-        "linea_34", "linea_35", "linea_60", "linea_61",
+        "linea_60", "linea_61",
     ]
 
-    for lk in orden_lineas:
+    for lk in orden:
         if lk not in docs or not docs[lk]:
             continue
 
         info = LINEAS_INFO.get(lk, {})
         seccion = info.get("seccion", "")
         doc_list = docs[lk]
+        columnas = _get_columnas(seccion, lk)
 
-        # --- Encabezado de sección por línea ---
+        # Header de sección
         header = (
             f"LÍNEA {info.get('linea', '?')} — "
             f"{info.get('nombre', lk)} — "
             f"Cód. {info.get('codigo', '?')} — "
             f"{len(doc_list)} documento(s)"
         )
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
-        cell = ws.cell(row=row, column=1, value=header)
-        cell.font = Font(name="Arial", size=10, bold=True, color=BLANCO)
-
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=10)
+        cell = ws.cell(row=r, column=1, value=header)
         color = {"debito": "E65100", "credito": "2E7D32", "retencion": "1565C0"}.get(seccion, "333333")
         fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
-        for col in range(1, 11):
-            ws.cell(row=row, column=col).fill = fill
-            ws.cell(row=row, column=col).font = Font(name="Arial", size=10, bold=True, color=BLANCO)
-        row += 1
+        font_w = Font(name="Arial", size=9, bold=True, color=WHITE)
+        for c in range(1, 11):
+            ws.cell(row=r, column=c).fill = fill
+            ws.cell(row=r, column=c).font = font_w
+            ws.cell(row=r, column=c).border = BORDER
+        r += 1
 
-        # --- Encabezados de columnas ---
-        columnas = get_columnas_para_linea(seccion, lk)
-        ws.cell(row=row, column=1, value="#").font = FONT_DOC_BOLD
-        ws.cell(row=row, column=1).fill = FILL_TOTAL
-        ws.cell(row=row, column=1).alignment = ALIGN_CENTER
-        ws.cell(row=row, column=1).border = BORDER_THIN
+        # Column headers
+        _c(ws, r, 1, "#", F7B, FILL_GRAY, AC)
         for ci, cn in enumerate(columnas, 2):
-            c = ws.cell(row=row, column=ci, value=cn)
-            c.font = FONT_DOC_BOLD; c.fill = FILL_TOTAL
-            c.alignment = ALIGN_CENTER; c.border = BORDER_THIN
-        row += 1
+            _c(ws, r, ci, cn, F7B, FILL_GRAY, AC)
+        r += 1
 
-        # --- Filas de documentos ---
-        # Detectar cuáles columnas son de montos (las últimas 2-4 según tipo)
-        n_text_cols = 5  # numero, fecha, rut, razon_social, descripcion/cargo
+        # Data rows
+        n_text = 5
         totals = {}
-
         for i, doc in enumerate(doc_list, 1):
-            values = get_doc_values(doc, seccion, lk)
-
-            # Número de fila
-            ws.cell(row=row, column=1, value=i).font = FONT_DOC
-            ws.cell(row=row, column=1).alignment = ALIGN_CENTER
-            ws.cell(row=row, column=1).border = BORDER_THIN
-
-            alt_fill = None
-            if i % 2 == 0:
-                alt_fill = FILL_DEBITO_ROW if seccion == "debito" else (
-                    FILL_CREDITO_ROW if seccion == "credito" else None)
-            if alt_fill:
-                ws.cell(row=row, column=1).fill = alt_fill
+            values = _get_doc_values(doc, seccion, lk)
+            _c(ws, r, 1, i, F7, FILL_WHITE, AC)
+            alt = FILL_LGRAY if i % 2 == 0 else FILL_WHITE
+            ws.cell(row=r, column=1).fill = alt
 
             for ci, val in enumerate(values, 2):
-                cell = ws.cell(row=row, column=ci)
-                cell.border = BORDER_THIN
-
-                col_name = columnas[ci - 2]
-                is_monto = ci - 2 >= n_text_cols  # columnas después de los 5 campos de texto
-
+                cell = ws.cell(row=r, column=ci)
+                cell.border = BORDER
+                cell.fill = alt
+                is_monto = ci - 2 >= n_text
                 if is_monto and isinstance(val, (int, float)):
                     cell.value = formato_peso(val)
-                    cell.font = FONT_DOC; cell.alignment = ALIGN_RIGHT
+                    cell.font = F7
+                    cell.alignment = AR
+                    col_name = columnas[ci - 2]
                     totals[col_name] = totals.get(col_name, 0) + val
                 else:
                     cell.value = val
-                    cell.font = FONT_DOC; cell.alignment = ALIGN_LEFT
+                    cell.font = F7
+                    cell.alignment = AL
+            r += 1
 
-                if alt_fill:
-                    cell.fill = alt_fill
-
-            row += 1
-
-        # --- Fila TOTAL ---
-        ws.cell(row=row, column=1, value="").fill = FILL_TOTAL
-        ws.cell(row=row, column=1).border = BORDER_THIN
-        ws.cell(row=row, column=2, value="TOTAL").font = FONT_DOC_BOLD
-        ws.cell(row=row, column=2).fill = FILL_TOTAL
-        ws.cell(row=row, column=2).border = BORDER_THIN
-
+        # Total row
+        _c(ws, r, 1, "", F7B, FILL_GRAY, AC)
+        _c(ws, r, 2, "TOTAL", F7B, FILL_GRAY, AL)
         for ci, cn in enumerate(columnas, 2):
-            cell = ws.cell(row=row, column=ci)
-            cell.fill = FILL_TOTAL; cell.border = BORDER_THIN
+            cell = ws.cell(row=r, column=ci)
+            cell.fill = FILL_GRAY
+            cell.border = BORDER
             if cn in totals:
                 cell.value = formato_peso(totals[cn])
-                cell.font = Font(name="Arial", size=8, bold=True, color="CC0000")
-                cell.alignment = ALIGN_RIGHT
+                cell.font = Font(name="Arial", size=7, bold=True, color="CC0000")
+                cell.alignment = AR
             else:
-                cell.font = FONT_DOC_BOLD
-
-        row += 2  # espacio entre secciones
-
-
-def _write_hoja_calculos(wb, codigos, datos):
-    """Hoja 3: Resumen de fórmulas."""
-    ws = wb.create_sheet(title="Detalle de Cálculos")
-    ws.column_dimensions["A"].width = 45
-    ws.column_dimensions["B"].width = 25
-
-    r = 1
-    ws.cell(row=r, column=1, value="DETALLE DE CÁLCULOS DEL F29").font = FONT_SECTION
-    r += 2
-
-    for desc, val in [
-        ("DÉBITO FISCAL", ""),
-        ("Facturas afectas IVA (código 502)", formato_peso(codigos[502])),
-        ("ND emitidas IVA (código 513)", formato_peso(codigos[513])),
-        ("(-) NC emitidas IVA (código 510)", formato_peso(codigos[510])),
-        ("Total Débito (código 538)", formato_peso(codigos[538])),
-        ("", ""),
-        ("CRÉDITO FISCAL", ""),
-        ("Facturas del giro IVA (código 520)", formato_peso(codigos[520])),
-        ("Activo fijo IVA (código 525)", formato_peso(codigos[525])),
-        ("FC digital IVA (efecto neutro)", formato_peso(int(codigos[587] * 0.19))),
-        ("Remanente CF anterior (código 504)", formato_peso(codigos[504])),
-        ("Total Crédito (código 537)", formato_peso(codigos[537])),
-        ("", ""),
-        ("DETERMINACIÓN IVA", ""),
-        ("Débito − Crédito", f"{formato_peso(codigos[538])} − {formato_peso(codigos[537])}"),
-        ("IVA a pagar (89)" if codigos[89] > 0 else "Remanente CF (77)",
-         formato_peso(codigos[89]) if codigos[89] > 0 else formato_peso(codigos[77])),
-        ("", ""),
-        ("PPM", ""),
-        ("Base (código 563)", formato_peso(codigos[563])),
-        ("Tasa (código 115)", f"{codigos[115]}%"),
-        ("PPM determinado (código 62)", formato_peso(codigos[62])),
-        ("(-) SENCE (código 723)", formato_peso(codigos[723])),
-        ("", ""),
-        ("TOTAL", ""),
-        ("IVA determinado", formato_peso(codigos[89])),
-        ("+ IUSC (código 48)", formato_peso(codigos[48])),
-        ("+ Retención honorarios (código 151)", formato_peso(codigos[151])),
-        ("+ PPM neto", formato_peso(codigos[62] - codigos[723])),
-        ("= TOTAL A PAGAR (código 91)", formato_peso(codigos[91])),
-    ]:
-        ws.cell(row=r, column=1, value=desc).font = FONT_SECTION if val == "" and desc else FONT_NORMAL
-        ws.cell(row=r, column=2, value=val).font = FONT_NORMAL
-        r += 1
+                cell.font = F7B
+        r += 2
 
 
-def _write_hoja_alertas(wb, codigos, datos):
-    """Hoja 4: Alertas y notas."""
+# ============================================================
+# Hoja 3: Alertas
+# ============================================================
+
+def _write_alertas(wb, codigos, datos):
+    """Hoja 3: Alertas y notas."""
     enc = datos.get("encabezado", {})
-    docs = datos.get("documentos", {})
+    notas = datos.get("notas", [])
 
     ws = wb.create_sheet(title="Alertas y Notas")
-    ws.column_dimensions["A"].width = 14
-    ws.column_dimensions["B"].width = 70
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["B"].width = 80
 
     r = 1
-    ws.cell(row=r, column=1, value="ALERTAS Y VALIDACIONES").font = FONT_SECTION
+    _c(ws, r, 1, "ALERTAS Y VALIDACIONES", F10B, FILL_BLUE, AL)
+    _c(ws, r, 2, "", F10B, FILL_BLUE, AL)
     r += 2
 
     alertas = []
 
-    if codigos[77] > 0 and codigos[538] > 0 and codigos[77] > codigos[538] * 3:
-        alertas.append(("⚠️ REMANENTE",
-            f"Remanente CF ({formato_peso(codigos[77])}) muy superior al débito. "
-            "Considerar devolución Art. 36 o Art. 27 bis."))
+    if codigos.get(77, 0) > 0 and codigos.get(538, 0) > 0:
+        ratio = codigos[77] / max(codigos[538], 1)
+        if ratio > 3:
+            alertas.append(("REMANENTE",
+                f"Remanente CF ({formato_peso(codigos[77])}) muy superior al débito. "
+                "Considerar devolución Art. 36 o Art. 27 bis."))
 
     if codigos.get(585, 0) > 0:
-        alertas.append(("📦 EXPORTACIÓN",
+        alertas.append(("EXPORTACIÓN",
             f"{codigos[585]} facturas de exportación ({formato_peso(codigos[20])} neto). "
-            "Verificar calificación Aduanas. DUS requerido si > USD 2.000."))
+            "Verificar calificación Aduanas."))
 
-    if codigos.get(515, 0) > 0:
-        alertas.append(("☁️ SERV. DIGITALES",
-            f"{codigos[515]} FC servicios digitales (neto: {formato_peso(codigos[587])}). "
-            "Verificar emisión Factura de Compra tipo 46."))
+    if codigos.get(596, 0) > 0:
+        alertas.append(("CAMBIO SUJETO",
+            f"Retención cambio de sujeto: {formato_peso(codigos[596])}. "
+            "Corresponde a IVA retenido por FC de servicios digitales extranjeros."))
 
-    if codigos[151] > 0:
-        alertas.append(("👤 HONORARIOS",
+    if codigos.get(151, 0) > 0:
+        alertas.append(("HONORARIOS",
             f"Retención: {formato_peso(codigos[151])}. Tasa 2026: 15,25%."))
 
-    if codigos[504] > 0:
-        alertas.append(("🔄 REMANENTE ANT.",
+    if codigos.get(504, 0) > 0:
+        alertas.append(("REMANENTE ANT.",
             f"Remanente CF arrastrado: {formato_peso(codigos[504])}. "
             "Verificar vs código 77 del F29 anterior."))
 
     has_afectas = codigos.get(503, 0) > 0 or codigos.get(110, 0) > 0
     has_exentas = codigos.get(585, 0) > 0 or codigos.get(586, 0) > 0
     if has_afectas and has_exentas:
-        alertas.append(("⚠️ PRORRATEO",
+        alertas.append(("PRORRATEO",
             "Ventas afectas + exentas/exportación. Verificar prorrateo de CF de uso común."))
 
-    # Validar consistencia docs vs códigos
-    check_map = {"linea_7": 503, "linea_13": 509, "linea_12": 512,
-                 "linea_28": 519, "linea_31": 524, "linea_1": 585}
-    for lk, cod in check_map.items():
-        if lk in docs and docs[lk]:
-            n = len(docs[lk])
-            if codigos.get(cod, 0) != n:
-                info = LINEAS_INFO.get(lk, {})
-                alertas.append(("⚠️ INCONSISTENCIA",
-                    f"Línea {info.get('linea', '?')}: cantidad calculada={codigos[cod]} "
-                    f"pero hay {n} documentos."))
+    # Notas adicionales pasadas por el usuario
+    for nota in notas:
+        if isinstance(nota, tuple) and len(nota) == 2:
+            alertas.append(nota)
+        elif isinstance(nota, str):
+            alertas.append(("NOTA", nota))
 
     mes = enc.get("periodo_mes", 1)
     anio = enc.get("periodo_anio", 2026)
     sig_mes = mes % 12 + 1
     sig_anio = anio if mes < 12 else anio + 1
-    alertas.append(("📅 PLAZO",
+    alertas.append(("PLAZO",
         f"Declarar antes del 20 de {MESES.get(sig_mes, '')} {sig_anio} (internet)."))
 
-    alertas.append(("📋 DISCLAIMER",
-        "Herramienta de apoyo. NO es asesoría tributaria. "
+    alertas.append(("DISCLAIMER",
+        "Herramienta de apoyo administrativo. NO es asesoría tributaria. "
         "Debe ser revisado por un contador antes de presentarse al SII."))
 
+    fill_warn = PatternFill(start_color="FCE4EC", end_color="FCE4EC", fill_type="solid")
     for tipo, msg in alertas:
-        c1 = ws.cell(row=r, column=1, value=tipo)
-        c1.font = Font(name="Arial", size=9, bold=True)
-        c2 = ws.cell(row=r, column=2, value=msg)
-        c2.font = FONT_NORMAL
-        c2.alignment = Alignment(wrap_text=True, vertical="top")
-        if "⚠️" in tipo:
-            c1.fill = FILL_ALERTA; c2.fill = FILL_ALERTA
+        c1 = _c(ws, r, 1, tipo, F8B, FILL_WHITE, AL)
+        c2 = _c(ws, r, 2, msg, F7, FILL_WHITE, Alignment(wrap_text=True, vertical="top"))
+        if tipo in ("REMANENTE", "PRORRATEO"):
+            c1.fill = fill_warn
+            c2.fill = fill_warn
         r += 1
 
 
+# ============================================================
+# Función principal
+# ============================================================
+
 def generar_f29_excel(datos, output_path):
     """
-    Genera Excel del F29 con 4 hojas:
-        1. F29 resumen
-        2. Detalle de documentos por línea (NUEVO v2)
-        3. Detalle de cálculos
-        4. Alertas y notas
+    Genera Excel del F29 con 3 hojas:
+        1. F29 formulario (estilo SII)
+        2. Detalle de documentos por línea
+        3. Alertas y notas
+
+    datos puede incluir:
+        - "codigos": dict {código_f29: valor} para usar valores directos
+        - O la estructura tradicional (ventas, compras, documentos, etc.)
+        - "encabezado": {rut, razon_social, periodo_mes, periodo_anio, folio}
+        - "documentos": {linea_7: [...], linea_28: [...], ...}
+        - "notas": [(tipo, mensaje), ...] para alertas adicionales
     """
     codigos = calcular_f29(datos)
     enc = datos.get("encabezado", {})
+
     wb = openpyxl.Workbook()
-    _write_hoja_f29(wb, codigos, enc, datos)
-    _write_hoja_detalle_docs(wb, datos, codigos)
-    _write_hoja_calculos(wb, codigos, datos)
-    _write_hoja_alertas(wb, codigos, datos)
+    _write_f29(wb, codigos, enc)
+    _write_detalle(wb, datos)
+    _write_alertas(wb, codigos, datos)
+
     wb.save(output_path)
     return codigos
 
 
 # ============================================================
-# Testing
+# CLI / Testing
 # ============================================================
 if __name__ == "__main__":
+    # Ejemplo: F29 con códigos pre-calculados
     datos_ejemplo = {
         "encabezado": {
-            "rut": "76.123.456-7",
-            "razon_social": "DevSoft SpA",
-            "periodo_mes": 1,
-            "periodo_anio": 2026,
-            "regimen": "pro_pyme_general",
+            "rut": "78.033.706-0",
+            "razon_social": "TOTOMENU SPA",
+            "periodo_mes": 12,
+            "periodo_anio": 2025,
+            "folio": "8740690436",
         },
-        "documentos": {
-            "linea_7": [
-                {"tipo": "factura", "numero": "F-00101", "fecha": "2026-01-05",
-                 "rut": "77.000.100-5", "razon_social": "Banco Nacional S.A.",
-                 "descripcion": "Desarrollo módulo core banking",
-                 "neto": 8000000, "iva": 1520000, "exento": 0, "total": 9520000},
-                {"tipo": "factura", "numero": "F-00102", "fecha": "2026-01-10",
-                 "rut": "76.500.200-3", "razon_social": "Retail Chile SpA",
-                 "descripcion": "Mantención plataforma e-commerce",
-                 "neto": 3500000, "iva": 665000, "exento": 0, "total": 4165000},
-                {"tipo": "factura", "numero": "F-00103", "fecha": "2026-01-15",
-                 "rut": "78.900.300-1", "razon_social": "Logística Express Ltda.",
-                 "descripcion": "Consultoría arquitectura microservicios",
-                 "neto": 2000000, "iva": 380000, "exento": 0, "total": 2380000},
-                {"tipo": "factura", "numero": "F-00104", "fecha": "2026-01-18",
-                 "rut": "76.500.200-3", "razon_social": "Retail Chile SpA",
-                 "descripcion": "Desarrollo integración API pagos",
-                 "neto": 4500000, "iva": 855000, "exento": 0, "total": 5355000},
-                {"tipo": "factura", "numero": "F-00105", "fecha": "2026-01-22",
-                 "rut": "79.100.400-K", "razon_social": "Seguros del Pacífico S.A.",
-                 "descripcion": "Sprint 3 - Portal clientes",
-                 "neto": 6000000, "iva": 1140000, "exento": 0, "total": 7140000},
-                {"tipo": "factura", "numero": "F-00106", "fecha": "2026-01-25",
-                 "rut": "77.000.100-5", "razon_social": "Banco Nacional S.A.",
-                 "descripcion": "Soporte mensual sistemas",
-                 "neto": 1500000, "iva": 285000, "exento": 0, "total": 1785000},
-                {"tipo": "factura", "numero": "F-00107", "fecha": "2026-01-28",
-                 "rut": "76.800.500-7", "razon_social": "Minera Austral SpA",
-                 "descripcion": "Dashboard analítica operacional",
-                 "neto": 3200000, "iva": 608000, "exento": 0, "total": 3808000},
-                {"tipo": "factura", "numero": "F-00108", "fecha": "2026-01-30",
-                 "rut": "78.200.600-2", "razon_social": "Constructora Pacífico Ltda.",
-                 "descripcion": "App mobile seguimiento obras",
-                 "neto": 2800000, "iva": 532000, "exento": 0, "total": 3332000},
-            ],
-            "linea_13": [
-                {"tipo": "nota_credito", "numero": "NC-0015", "fecha": "2026-01-20",
-                 "rut": "76.500.200-3", "razon_social": "Retail Chile SpA",
-                 "descripcion": "Descuento por volumen Q4 2025",
-                 "neto": 1000000, "iva": 190000, "exento": 0, "total": 1190000},
-            ],
-            "linea_1": [
-                {"tipo": "factura_exportacion", "numero": "EXP-0021", "fecha": "2026-01-08",
-                 "rut": "EXT-001", "razon_social": "TechCorp Inc. (USA)",
-                 "descripcion": "SaaS platform - monthly license",
-                 "neto": 7000000, "iva": 0, "exento": 7000000, "total": 7000000},
-                {"tipo": "factura_exportacion", "numero": "EXP-0022", "fecha": "2026-01-22",
-                 "rut": "EXT-002", "razon_social": "DataFlow GmbH (Germany)",
-                 "descripcion": "Custom API development - milestone 2",
-                 "neto": 5000000, "iva": 0, "exento": 5000000, "total": 5000000},
-            ],
-            "linea_28": [
-                {"tipo": "factura", "numero": "F-98001", "fecha": "2026-01-02",
-                 "rut": "96.000.000-0", "razon_social": "Inmobiliaria Oficinas SpA",
-                 "descripcion": "Arriendo oficina enero",
-                 "neto": 1800000, "iva": 342000, "total": 2142000},
-                {"tipo": "factura", "numero": "F-98002", "fecha": "2026-01-05",
-                 "rut": "76.100.100-1", "razon_social": "VTR Comunicaciones S.A.",
-                 "descripcion": "Internet fibra 1Gbps",
-                 "neto": 89000, "iva": 16910, "total": 105910},
-                {"tipo": "factura", "numero": "F-98003", "fecha": "2026-01-10",
-                 "rut": "76.200.200-2", "razon_social": "Enel Distribución Chile",
-                 "descripcion": "Electricidad oficina",
-                 "neto": 120000, "iva": 22800, "total": 142800},
-                {"tipo": "factura", "numero": "F-98004", "fecha": "2026-01-12",
-                 "rut": "78.300.300-3", "razon_social": "Cleaning Pro Ltda.",
-                 "descripcion": "Servicio aseo oficina",
-                 "neto": 250000, "iva": 47500, "total": 297500},
-                {"tipo": "factura", "numero": "F-98005", "fecha": "2026-01-15",
-                 "rut": "76.400.400-4", "razon_social": "Café & Snacks SpA",
-                 "descripcion": "Coffee break mensual",
-                 "neto": 180000, "iva": 34200, "total": 214200},
-                {"tipo": "factura", "numero": "F-98006", "fecha": "2026-01-20",
-                 "rut": "79.500.500-5", "razon_social": "LegalTech Abogados Ltda.",
-                 "descripcion": "Asesoría legal contratos software",
-                 "neto": 800000, "iva": 152000, "total": 952000},
-            ],
-            "linea_31": [
-                {"tipo": "factura", "numero": "F-55001", "fecha": "2026-01-18",
-                 "rut": "76.600.600-6", "razon_social": "Apple Chile SpA",
-                 "descripcion": "3x MacBook Pro M4 para equipo dev",
-                 "neto": 8700000, "iva": 1653000, "total": 10353000},
-            ],
-            "linea_5": [
-                {"tipo": "factura_compra", "numero": "FC-0031", "fecha": "2026-01-31",
-                 "rut": "EXT-AWS", "razon_social": "Amazon Web Services Inc.",
-                 "descripcion": "Cloud computing enero (EC2, S3, RDS)",
-                 "neto": 850000, "iva": 161500, "total": 1011500},
-                {"tipo": "factura_compra", "numero": "FC-0032", "fecha": "2026-01-31",
-                 "rut": "EXT-GCP", "razon_social": "Google Cloud Platform",
-                 "descripcion": "Cloud Run + BigQuery enero",
-                 "neto": 320000, "iva": 60800, "total": 380800},
-                {"tipo": "factura_compra", "numero": "FC-0033", "fecha": "2026-01-31",
-                 "rut": "EXT-GH", "razon_social": "GitHub Inc.",
-                 "descripcion": "GitHub Enterprise - 15 seats",
-                 "neto": 180000, "iva": 34200, "total": 214200},
-            ],
-            "linea_61": [
-                {"tipo": "boleta_honorarios", "numero": "BH-5001", "fecha": "2026-01-31",
-                 "rut": "15.123.456-7", "razon_social": "María Pérez González",
-                 "descripcion": "Desarrollo frontend React - 80hrs",
-                 "bruto": 2000000, "retencion": 305000, "liquido": 1695000},
-                {"tipo": "boleta_honorarios", "numero": "BH-5002", "fecha": "2026-01-31",
-                 "rut": "16.789.012-3", "razon_social": "Carlos Muñoz Rivera",
-                 "descripcion": "QA testing automatizado",
-                 "bruto": 1000000, "retencion": 152500, "liquido": 847500},
-            ],
-            "linea_60": [
-                {"tipo": "liquidacion_sueldo", "numero": "LIQ-001", "fecha": "2026-01-31",
-                 "rut": "17.111.222-3", "razon_social": "Andrea López Silva",
-                 "cargo": "Tech Lead", "bruto": 3500000, "iusc": 185000, "liquido": 2800000},
-                {"tipo": "liquidacion_sueldo", "numero": "LIQ-002", "fecha": "2026-01-31",
-                 "rut": "18.333.444-5", "razon_social": "Diego Fernández Castro",
-                 "cargo": "Senior Developer", "bruto": 2800000, "iusc": 95000, "liquido": 2350000},
-                {"tipo": "liquidacion_sueldo", "numero": "LIQ-003", "fecha": "2026-01-31",
-                 "rut": "19.555.666-7", "razon_social": "Valentina Rojas Morales",
-                 "cargo": "UX Designer", "bruto": 2200000, "iusc": 45000, "liquido": 1900000},
-            ],
+        "codigos": {
+            503: 14, 502: 2541111,
+            538: 2541111,
+            511: 2074, 514: 0,
+            584: 4, 562: 452579,
+            519: 32, 520: 497664,
+            527: 1, 528: 2934,
+            537: 494730,
+            77: 0, 89: 2046381,
+            48: 0, 151: 0, 153: 0,
+            563: 13374273, 115: 2.5, 62: 334357,
+            595: 2380738,
+            39: 495590, 736: 2934, 596: 492656,
+            547: 2873394,
+            91: 2873394, 92: 0, 93: 0, 94: 2873394,
         },
-        "remanente_anterior": 450000,
-        "devoluciones": {
-            "art_36_exportador": 0, "art_27_bis": 0,
-            "certificado_27_bis": 0, "cambio_sujeto": 0,
-        },
-        "retenciones": {"directores_retencion": 0},
-        "ppm": {
-            "tasa": 0.25, "base_imponible": None,
-            "credito_sence": 0, "remanente_sence_anterior": 0,
-            "suspension": False,
-        },
-        "ventas": {},
-        "compras": {},
     }
 
-    output = "f29_enero_2026_v2.xlsx"
+    output = "f29_diciembre_2025_test.xlsx"
     codigos = generar_f29_excel(datos_ejemplo, output)
-    print(f"✅ F29 v2.0 generado: {output}")
-    print(f"   Facturas afectas: {codigos[503]} docs → Débito IVA: {formato_peso(codigos[502])}")
-    print(f"   NC emitidas: {codigos[509]} docs → IVA: {formato_peso(codigos[510])}")
-    print(f"   Exportaciones: {codigos[585]} docs → Neto: {formato_peso(codigos[20])}")
-    print(f"   Facturas compras: {codigos[519]} docs → CF IVA: {formato_peso(codigos[520])}")
-    print(f"   Activo fijo: {codigos[524]} docs → CF IVA: {formato_peso(codigos[525])}")
-    print(f"   FC digitales: {codigos[515]} docs → Neto: {formato_peso(codigos[587])}")
-    print(f"   Honorarios: retención {formato_peso(codigos[151])}")
-    print(f"   IUSC: {formato_peso(codigos[48])}")
-    print(f"   ---")
-    print(f"   Total Débito (538): {formato_peso(codigos[538])}")
-    print(f"   Total Crédito (537): {formato_peso(codigos[537])}")
-    print(f"   IVA a pagar (89): {formato_peso(codigos[89])}")
-    print(f"   Remanente CF (77): {formato_peso(codigos[77])}")
-    print(f"   PPM (62): {formato_peso(codigos[62])}")
-    print(f"   TOTAL A PAGAR (91): {formato_peso(codigos[91])}")
+    print(f"F29 generado: {output}")
+    print(f"  Débito (538): {formato_peso(codigos.get(538, 0))}")
+    print(f"  Crédito (537): {formato_peso(codigos.get(537, 0))}")
+    print(f"  IVA det (89): {formato_peso(codigos.get(89, 0))}")
+    print(f"  PPM (62): {formato_peso(codigos.get(62, 0))}")
+    print(f"  CS (596): {formato_peso(codigos.get(596, 0))}")
+    print(f"  Total (91): {formato_peso(codigos.get(91, 0))}")
