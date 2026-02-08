@@ -264,21 +264,84 @@ Si la empresa tiene TANTO ventas afectas como exentas o de exportación en el mi
 
 ## Formato de salida
 
-El archivo Excel generado debe tener 3 hojas:
+El archivo Excel generado debe tener 4 hojas:
 
 ### Hoja 1: "F29 — [Mes] [Año]"
 Replica la estructura oficial del F29 con todos los códigos, valores calculados y totales.
-Formato visual profesional con colores del SII (azul oscuro para encabezados, celdas amarillas
-para valores editables, celdas verdes para cálculos automáticos).
+Cada línea que tiene documentos de respaldo indica la cantidad y referencia a la hoja de detalle.
 
-### Hoja 2: "Detalle de Cálculos"
-Muestra el desglose de cada código: de dónde viene cada número, qué facturas lo componen,
-las fórmulas aplicadas. Esto permite al contador verificar cada línea.
+### Hoja 2: "Detalle Documentos"
+**NUEVA v2**: Desglosa cada línea del F29 con los documentos individuales que la componen.
+Para cada documento muestra: N° documento, fecha, RUT, razón social, descripción, neto, IVA,
+exento y total. Incluye fila de totales por sección. Columnas adaptadas según tipo:
+- Ventas/Débito: N° Doc, Fecha, RUT Cliente, Razón Social, Descripción, Neto, IVA, Exento, Total
+- Compras/Crédito: N° Doc, Fecha, RUT Proveedor, Razón Social, Descripción, Neto, IVA, Total
+- Honorarios: N° Boleta, Fecha, RUT Profesional, Razón Social, Descripción, Bruto, Retención, Líquido
+- Sueldos: N° Liquidación, Fecha, RUT Trabajador, Nombre, Cargo, Sueldo Bruto, IUSC, Líquido
 
-### Hoja 3: "Alertas y Notas"
-Lista todas las validaciones ejecutadas, advertencias encontradas, y notas relevantes para
-el período (ej: "Se detectaron facturas de exportación — verificar calificación ante Aduanas",
-"El remanente de CF es significativo — considerar solicitar devolución Art. 36").
+### Hoja 3: "Detalle de Cálculos"
+Muestra el desglose de cada código: de dónde viene cada número, las fórmulas aplicadas.
+
+### Hoja 4: "Alertas y Notas"
+Validaciones, advertencias y notas relevantes para el período.
+
+## Estructura de documentos individuales
+
+Cuando Claude extrae datos de los archivos del usuario, debe organizar los documentos
+en el dict `datos["documentos"]` agrupados por línea del F29:
+
+```python
+datos["documentos"] = {
+    "linea_7": [     # Facturas afectas del giro
+        {
+            "tipo": "factura",
+            "numero": "F-00101",
+            "fecha": "2026-01-05",
+            "rut": "76.543.210-K",
+            "razon_social": "Cliente SpA",
+            "descripcion": "Desarrollo módulo X",
+            "neto": 5000000,
+            "iva": 950000,
+            "exento": 0,
+            "total": 5950000,
+        },
+    ],
+    "linea_13": [],  # Notas de crédito emitidas
+    "linea_1": [],   # Facturas de exportación
+    "linea_28": [],  # Facturas recibidas (compras)
+    "linea_31": [],  # Facturas activo fijo
+    "linea_5": [],   # Facturas de compra (serv. digitales)
+    "linea_12": [],  # Notas de débito emitidas
+    "linea_61": [    # Boletas de honorarios → campos: bruto, retencion, liquido
+        {
+            "tipo": "boleta_honorarios",
+            "numero": "BH-3001",
+            "rut": "15.123.456-7",
+            "razon_social": "María Pérez",
+            "descripcion": "Desarrollo frontend",
+            "bruto": 2000000,
+            "retencion": 305000,
+            "liquido": 1695000,
+        },
+    ],
+    "linea_60": [    # Liquidaciones de sueldo → campos: bruto, iusc, liquido, cargo
+        {
+            "tipo": "liquidacion_sueldo",
+            "numero": "LIQ-001",
+            "rut": "17.111.222-3",
+            "razon_social": "Andrea López",
+            "cargo": "Tech Lead",
+            "bruto": 3500000,
+            "iusc": 185000,
+            "liquido": 2800000,
+        },
+    ],
+}
+```
+
+Si se proporcionan documentos para una línea, los totales se recalculan automáticamente
+desde ellos. Si no hay documentos, se usan los totales agregados de datos["ventas"],
+datos["compras"] y datos["retenciones"].
 
 ---
 
