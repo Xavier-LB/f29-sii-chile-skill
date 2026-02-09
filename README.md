@@ -95,9 +95,17 @@ Claude te pedirá los datos que falten y generará el Excel.
 
 ### Hoja 1 — F29 del período
 Replica la estructura oficial del SII con todos los códigos, montos y totales.
+- **Montos editables**: Todos los valores son numéricos (no texto), se pueden modificar directamente
+- **Fórmulas en totales**: Líneas 23, 49, 50, 80, 122, 140, 147 y 150 usan fórmulas Excel que se recalculan automáticamente al editar valores
+- **PPM con fórmula**: Base imponible × Tasa se calcula automáticamente
+- **Cambio de sujeto**: Sección completa (líneas 118-122) para FC de servicios digitales extranjeros
 
-### Hoja 2 — Detalle de Cálculos
-Desglose de cada código: de dónde viene cada número, qué facturas lo componen, fórmulas aplicadas. Para que el contador pueda verificar línea por línea.
+### Hoja 2 — Detalle de Documentos
+Desglose por línea: todos los documentos que componen cada código del F29.
+- **Todos los documentos**: Incluye facturas emitidas, recibidas, FC, NC y boletas
+- **Fórmulas SUM**: Los totales de cada sección usan `=SUM()` para verificación
+- **Alerta de faltantes**: Si la cantidad declarada no coincide con los documentos detallados, muestra una advertencia amarilla con la diferencia
+- **RUT visible**: Muestra el RUT de cada emisor/receptor cuando está disponible
 
 ### Hoja 3 — Alertas y Notas
 Validaciones automáticas, advertencias y recomendaciones:
@@ -122,6 +130,29 @@ La skill incluye conocimiento específico sobre la tributación de empresas de t
 | **Retención honorarios 2026** | 15,25% (escala progresiva Ley 21.133) |
 
 ---
+
+## 🔧 Modos de uso
+
+### Modo códigos (directo)
+Pasa los valores del F29 ya calculados:
+```python
+datos = {
+    "encabezado": {"rut": "78.033.706-0", "razon_social": "MI EMPRESA", ...},
+    "codigos": {503: 14, 502: 2541111, 538: 2541111, ...},
+    "documentos": {"linea_7": [...], "linea_28": [...], "linea_32": [...]},
+}
+```
+
+### Modo cálculo (desde documentos)
+Pasa ventas, compras y documentos para que el script calcule los códigos:
+```python
+datos = {
+    "encabezado": {...},
+    "ventas": {"facturas_afectas_cant": 14, ...},
+    "compras": {"facturas_giro_cant": 32, ...},
+    "documentos": {"linea_7": [...], "linea_28": [...]},
+}
+```
 
 ## ⚙️ Requisitos técnicos
 
