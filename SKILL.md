@@ -20,36 +20,171 @@ empresas de desarrollo de software, pero funciona para cualquier contribuyente d
 
 ---
 
+## Fuente de datos preferida: RCV del SII
+
+### ¿Por qué usar el RCV?
+
+El **Registro de Compras y Ventas (RCV)** del SII es la fuente **autoritativa** para
+determinar qué documentos pertenecen a cada período tributario. Esto es crítico porque:
+
+1. **Las Facturas de Compra (FC) pueden emitirse fuera de plazo**: Una FC con fecha de
+   enero puede haberse emitido efectivamente en febrero en el SII. En ese caso, la FC
+   pertenece al período de **febrero** (mes de emisión real), no al de enero (fecha del
+   documento).
+
+2. **El RCV refleja la realidad del SII**: Muestra los documentos tal como están registrados
+   en el sistema del SII, con sus fechas reales de emisión/recepción. No hay ambigüedad.
+
+3. **Las Notas de Crédito anulan y reemplazan**: Si una FC fue anulada con NC y reemplazada
+   por otra, el RCV solo muestra los documentos vigentes del período.
+
+### Regla fundamental: Fecha de emisión real > Fecha del documento
+
+| Situación | ¿A qué período pertenece? |
+|-----------|--------------------------|
+| FC con fecha enero, emitida en SII en enero | Enero |
+| FC con fecha enero, emitida en SII en febrero | **Febrero** |
+| FC con fecha enero, emitida en SII en enero, anulada en febrero | No aparece (anulada) |
+| Factura recibida de proveedor chileno, recepcionada en enero | Enero |
+
+### Cómo obtener el RCV
+
+El usuario puede descargar el RCV desde el portal del SII:
+1. Ir a sii.cl → Mi SII → Registro de Compras y Ventas
+2. Seleccionar el período tributario (mes/año)
+3. Descargar en formato CSV o Excel
+4. Hay dos secciones: **Registro de Ventas** y **Registro de Compras**
+
+### Formato típico del RCV
+
+#### RCV de Ventas (CSV)
+Columnas típicas:
+- Tipo Doc (33=Factura, 61=NC, 56=ND)
+- Folio
+- Fecha Docto
+- RUT Receptor
+- Razón Social
+- Monto Exento
+- Monto Neto
+- Monto IVA
+- Monto Total
+
+#### RCV de Compras (CSV)
+Columnas típicas:
+- Tipo Doc (33=Factura recibida, 46=Factura de Compra, 61=NC recibida)
+- Folio
+- Fecha Docto
+- Fecha Recepción (esta es la fecha real en que el SII la registró)
+- RUT Proveedor
+- Razón Social
+- Monto Exento
+- Monto Neto
+- Monto IVA Recuperable
+- Monto Total
+- IVA No Recuperable
+- IVA Retenido Total
+- IVA Retenido Parcial
+
+### Mapeo RCV → Códigos F29
+
+#### Ventas (Débito Fiscal)
+| Tipo Doc RCV | Descripción | Códigos F29 |
+|-------------|-------------|-------------|
+| 33 | Factura Electrónica | 503 (cantidad), 502 (IVA) |
+| 34 | Factura No Afecta o Exenta | 586 (cantidad), 142 (monto exento) |
+| 61 | Nota de Crédito Electrónica | 509 (cantidad), 510 (IVA) |
+| 56 | Nota de Débito Electrónica | 512 (cantidad), 513 (IVA) |
+| 110 | Factura de Exportación | 585 (cantidad), 20 (monto) |
+| 39 | Boleta Electrónica | 110 (cantidad), 111 (IVA) |
+
+#### Compras (Crédito Fiscal)
+| Tipo Doc RCV | Descripción | Códigos F29 |
+|-------------|-------------|-------------|
+| 33 | Factura recibida (del giro) | 519 (cantidad), 520 (IVA) |
+| 46 | Factura de Compra (cambio sujeto) | 515 (cantidad), 587 (IVA retenido) → también suma a 520 |
+| 61 | NC recibida | 527 (cantidad), 528 (IVA) |
+| 56 | ND recibida | 531 (cantidad), 532 (IVA) |
+
+> **IMPORTANTE sobre FC (tipo 46)**: Las Facturas de Compra tienen doble efecto:
+> - Se registran como IVA Retenido (débito): código 596 = suma IVA de todas las FC
+> - Se registran como Crédito Fiscal: código 520 incluye el IVA de las FC
+> - Efecto neto = $0, pero ambos registros son obligatorios
+
+### Procedimiento cuando se tiene el RCV
+
+1. **Leer el RCV** de ventas y compras del período
+2. **Clasificar** cada documento según su tipo (ver tabla de mapeo arriba)
+3. **Sumar** por tipo de documento para obtener cantidades y montos por código F29
+4. **Cruzar** con los datos internos (CSVs del repositorio) para agregar descripciones
+   y detalles a la hoja de documentos
+5. **Verificar** que los totales del RCV coincidan con los datos internos. Si hay
+   discrepancias, **el RCV manda** — informar las diferencias al usuario
+
+### Procedimiento cuando NO se tiene el RCV (fallback)
+
+Si el usuario no proporciona el RCV, se puede generar el F29 usando los datos internos
+(CSVs de facturas emitidas, recibidas y de compra), pero con las siguientes advertencias:
+
+1. **Advertir** que las FC se están contando por la fecha del documento, no por la fecha
+   real de emisión en el SII
+2. **Recomendar** verificar el resultado contra el RCV del SII antes de declarar
+3. **Marcar** en la hoja de Alertas que el F29 fue generado sin RCV
+
+---
+
 ## Flujo de trabajo
 
 ### Paso 1 — Identificar documentos disponibles
 
-Revisar los archivos subidos por el usuario en `/mnt/user-data/uploads/`. Los documentos
-típicos que se esperan son:
+Revisar los archivos disponibles. **Solicitar siempre el RCV al usuario** como fuente
+principal. Los documentos típicos son:
 
-| Tipo de documento | Información que aporta |
-|-------------------|----------------------|
-| **Libro de Ventas** (CSV/XLSX/PDF) | Facturas emitidas → Débito fiscal (línea 7) |
-| **Libro de Compras** (CSV/XLSX/PDF) | Facturas recibidas → Crédito fiscal (líneas 28-35) |
-| **Registro de Compras y Ventas (RCV)** del SII | Ambos lados, ya conciliado |
-| **Libro de Remuneraciones** (XLSX/PDF) | Impuesto Único 2da Categoría (línea 60) |
-| **Listado de Boletas de Honorarios** (CSV/PDF) | Retenciones Art. 42 N°2 (línea 61) |
-| **Facturas de Exportación** | Ventas exentas de exportación (línea 1) |
-| **F29 del mes anterior** (PDF/imagen) | Remanente de crédito fiscal (código 504) |
-| **Resumen de PPM** | Tasa y base imponible PPM (línea 69) |
+| Tipo de documento | Información que aporta | Prioridad |
+|-------------------|----------------------|-----------|
+| **RCV del SII** (CSV/XLSX) | Ventas y compras del período, con fechas reales | **PREFERIDO** |
+| **Libro de Ventas** (CSV/XLSX/PDF) | Facturas emitidas → Débito fiscal | Alternativa |
+| **Libro de Compras** (CSV/XLSX/PDF) | Facturas recibidas → Crédito fiscal | Alternativa |
+| **Libro de Remuneraciones** (XLSX/PDF) | Impuesto Único 2da Categoría (línea 60) | Complementario |
+| **Listado de Boletas de Honorarios** (CSV/PDF) | Retenciones Art. 42 N°2 (línea 61) | Complementario |
+| **Facturas de Exportación** | Ventas exentas de exportación (línea 1) | Si aplica |
+| **F29 del mes anterior** (PDF/imagen) | Remanente de crédito fiscal (código 504) | Siempre |
+| **Resumen de PPM** | Tasa y base imponible PPM (línea 69) | Si aplica |
 
 Si faltan documentos críticos, **preguntar al usuario** antes de continuar. Los datos mínimos
 necesarios son:
 
-1. Ventas del período (facturas emitidas o resumen)
-2. Compras del período (facturas recibidas o resumen)
-3. Remanente de crédito fiscal del mes anterior (código 504/77 del F29 previo), si existe
-4. Tasa de PPM vigente (preguntar si no se deduce de los documentos)
-5. Retenciones de honorarios pagados, si aplica
+1. **RCV del período** (ventas + compras) — o en su defecto, libros de ventas/compras
+2. Remanente de crédito fiscal del mes anterior (código 504/77 del F29 previo), si existe
+3. Tasa de PPM vigente (preguntar si no se deduce de los documentos)
+4. Retenciones de honorarios pagados, si aplica
+5. IUSC de liquidaciones de sueldo, si hay empleados
 
 ### Paso 2 — Extraer datos de los documentos
 
-Usar las herramientas disponibles para leer cada archivo:
+#### Opción A: Desde el RCV (preferido)
+
+```python
+import pandas as pd
+
+# Leer RCV de ventas y compras
+rcv_ventas = pd.read_csv("rcv_ventas.csv")  # o pd.read_excel()
+rcv_compras = pd.read_csv("rcv_compras.csv")
+
+# Clasificar por tipo de documento
+facturas_emitidas = rcv_ventas[rcv_ventas["Tipo Doc"] == 33]
+nc_emitidas = rcv_ventas[rcv_ventas["Tipo Doc"] == 61]
+nd_emitidas = rcv_ventas[rcv_ventas["Tipo Doc"] == 56]
+
+facturas_recibidas = rcv_compras[rcv_compras["Tipo Doc"] == 33]
+fc_emitidas = rcv_compras[rcv_compras["Tipo Doc"] == 46]  # Facturas de Compra
+nc_recibidas = rcv_compras[rcv_compras["Tipo Doc"] == 61]
+```
+
+**Nota**: Los nombres de columnas pueden variar según la versión del export del SII.
+Adaptar según las columnas reales del archivo. Verificar si hay columnas para IVA
+Retenido (para FCs tipo 46).
+
+#### Opción B: Desde archivos internos (fallback)
 
 ```python
 # Para PDFs: usar pypdf o pdfplumber
@@ -68,7 +203,7 @@ df = pd.read_csv("libro_ventas.csv")
 
 **Datos a extraer de cada fuente:**
 
-#### Del Libro de Ventas / Facturas emitidas:
+#### Del RCV o Libro de Ventas / Facturas emitidas:
 - Cantidad de facturas afectas del giro → código 503
 - Monto neto total de facturas afectas → para calcular código 502 (neto × 19%)
 - Cantidad y monto de notas de crédito emitidas → códigos 509/510
@@ -77,7 +212,7 @@ df = pd.read_csv("libro_ventas.csv")
 - Facturas exentas → códigos 586/142
 - Boletas electrónicas → códigos 110/111 o 758/759
 
-#### Del Libro de Compras / Facturas recibidas:
+#### Del RCV o Libro de Compras / Facturas recibidas:
 - Facturas con derecho a crédito fiscal → códigos 519/520
 - Facturas de activo fijo → códigos 524/525
 - Notas de crédito recibidas → códigos 527/528
@@ -162,6 +297,14 @@ Ejecutar las siguientes validaciones antes de generar el archivo:
 5. **Consistencia cantidades vs montos**: si hay 0 facturas, el monto debe ser 0
 6. **Código 91 ≥ 0**: el total a pagar no puede ser negativo (sería un error)
 7. **Exportaciones**: si hay facturas de exportación, no deben generar débito fiscal
+8. **Cruce RCV vs datos internos** (si se usó RCV): Comparar las cantidades y montos
+   del RCV con los datos de los CSVs internos. Reportar diferencias, especialmente:
+   - FCs que aparecen en el CSV interno pero NO en el RCV del período (posible emisión
+     tardía — la FC se emitió en otro mes)
+   - FCs que aparecen en el RCV pero NO en el CSV interno (falta registrar en el sistema)
+   - Diferencias de montos entre RCV y datos internos
+9. **Alerta sin RCV**: Si no se usó el RCV, agregar alerta prominente indicando que las
+   FCs se contaron por fecha del documento y podrían no coincidir con la emisión real
 
 Si alguna validación falla, **informar al usuario** con detalle del error y pedir confirmación
 o corrección antes de continuar.
