@@ -1,8 +1,11 @@
 """
-generar_f29.py v5 — Genera Excel F29 con estructura completa del SII.
+generar_f29.py v7 — Genera Excel F29 con estructura completa del SII.
 
 Replica exactamente la estructura, colores y fórmulas del formulario oficial F29
-(194 filas, 150 líneas, todas las secciones).
+tal como aparece en sii.cl (ver f29.html como referencia).
+
+Layout de 15 columnas (A-O) que permite representar la sección PPM con sus
+6 pares código/valor en una sola fila, tal como en el HTML del SII.
 
 Uso:
     from scripts.generar_f29 import generar_f29_excel
@@ -10,26 +13,38 @@ Uso:
 """
 
 import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 # ============================================================
-# Estilos — Colores del F29 oficial
+# Estilos — Colores exactos del F29 en sii.cl (f29.html)
 # ============================================================
-FG = PatternFill(start_color="73B464", end_color="73B464", fill_type="solid")  # Green
-FB = PatternFill(start_color="D9EDF7", end_color="D9EDF7", fill_type="solid")  # Blue
-FE = PatternFill(start_color="E8E8E8", end_color="E8E8E8", fill_type="solid")  # Gray
-FL = PatternFill(start_color="EEEEEE", end_color="EEEEEE", fill_type="solid")  # Light gray
-FW = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+FB = PatternFill(start_color="D9EDF7", end_color="D9EDF7", fill_type="solid")  # Blue — headers, code cells
+FE = PatternFill(start_color="E8E8E8", end_color="E8E8E8", fill_type="solid")  # Gray — line numbers, sign cells
+FI = PatternFill(start_color="EEEEEE", end_color="EEEEEE", fill_type="solid")  # Input cells (value fields)
+FC = PatternFill(start_color="EBEBE4", end_color="EBEBE4", fill_type="solid")  # Calculated cells
+FW = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")  # White — descriptions
+FG = PatternFill(start_color="73B464", end_color="73B464", fill_type="solid")  # Green — total row line numbers
+FL = PatternFill(start_color="EEEEEE", end_color="EEEEEE", fill_type="solid")  # Alias for detail sheet
+
+BD = Border(
+    left=Side(style="thin", color="808080"),
+    right=Side(style="thin", color="808080"),
+    top=Side(style="thin", color="808080"),
+    bottom=Side(style="thin", color="808080"),
+)
 
 F14B = Font(name="Arial", size=14, bold=True)
-F11BW = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+F11B = Font(name="Arial", size=11, bold=True)
+F13B = Font(name="Arial", size=13, bold=True)
 F11 = Font(name="Arial", size=11)
 F10 = Font(name="Arial", size=10)
 F9B = Font(name="Arial", size=9, bold=True)
+F9 = Font(name="Arial", size=9)
 F8B = Font(name="Arial", size=8, bold=True)
 F8 = Font(name="Arial", size=8)
 F7C = Font(name="Arial", size=7, color="666666")
+F7 = Font(name="Arial", size=7)
 
 AL = Alignment(horizontal="left", vertical="center", wrap_text=True)
 AC = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -37,7 +52,27 @@ AR = Alignment(horizontal="right", vertical="center", wrap_text=True)
 
 NF = '#,##0'
 PF = '0.0#'
-NCOLS = 7
+NCOLS = 15
+
+# Column positions (1-indexed)
+CA = 1    # A: Line number
+CB = 2    # B: Description start
+CI = 9    # I: Code left (cq) — for standard 2-code rows
+CJ = 10   # J: Value left (cq)
+CM = 13   # M: Code right (ca) — main code column
+CN = 14   # N: Value right (ca) — main value column
+CO = 15   # O: Sign (+/-)
+
+# Description merge ranges
+DESC_2CODE = (CB, 8)   # B-H: when both cq and ca exist
+DESC_1CODE = (CB, 12)  # B-L: when only ca exists
+DESC_TOTAL = (CB, 12)  # B-L: for total/formula lines
+
+COL_WIDTHS = [
+    ('A', 4), ('B', 12), ('C', 5), ('D', 8), ('E', 4), ('F', 10),
+    ('G', 4), ('H', 10), ('I', 4), ('J', 10), ('K', 4), ('L', 8),
+    ('M', 4), ('N', 16), ('O', 3),
+]
 
 MESES = {
     1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
@@ -47,7 +82,6 @@ MESES = {
 
 
 def formato_peso(v):
-    """Formatea un valor como peso chileno ($1.234.567)."""
     if v is None or v == 0:
         return "$0"
     if isinstance(v, float):
@@ -58,7 +92,6 @@ def formato_peso(v):
 
 # ============================================================
 # Datos de líneas del F29
-# Formato: (num, descripción, cod_cant, cod_monto, operador)
 # ============================================================
 
 L_DEB_INFO = [
@@ -156,6 +189,8 @@ L_RET = [
     (68, 'Retención sobre retiros de Ahorro Previsional Voluntario del Art. 42 bis LIR (tasa 15%)', None, 589, '+'),
 ]
 
+# PPM: L_PPM keeps cq/ca for formula builder (_bf uses ca only)
+# Extra codes for multi-column lines are handled in the renderer
 L_PPM = [
     (69, '1ra Categoría Art. 84 a) y 14 D N° 3 letra (k) y 8 letra (a) numeral (viii)', 750, 62, '+'),
     (70, '1ra Cat. Art. 84 a) tasa 3%, reintegro préstamo tasa 0%', None, 156, '+'),
@@ -169,6 +204,16 @@ L_PPM = [
     (78, 'Taller artesanal Art.84, c) (tasa de 1,5% o 3%)', None, 70, '+'),
     (79, 'Renta Líquida Provisional inciso final de la letra a) del art 84 de la LIR, Ley N° 21.210', None, 776, '+'),
 ]
+
+# Multi-column PPM: codes for columns E-N (line 69) or F-N (lines 71-73)
+# Line 69: 6 pairs in cols C-N: [750, 30, 563, 115, 68, 62]
+# Lines 71-73: 5 pairs in cols E-N: [base, base_imp, tasa, credito, ppm_calc]
+PPM_LINE69_CODES = [750, 30, 563, 115, 68, 62]
+PPM_MULTI = {
+    71: [565, 120, 542, 122, 123],
+    72: [700, 701, 702, 711, 703],
+    73: [806, 807, 808, 809, 810],
+}
 
 L_TRIB_SIMP = [
     (81, 'Ventas del período', None, 529, None),
@@ -254,142 +299,194 @@ L_REM_CRED_ESP = [
     (146, 'Remanente Crédito por desembolsos directos trazabilidad', None, 771, None),
 ]
 
-# Todas las líneas que generan crédito (para fórmula línea 49)
 ALL_CRED_LINES = L_CRED_INT + L_CRED_IMP + L_CRED_REM + L_CRED_IEPD + L_CRED_OTROS
 
-# Todas las líneas 50-79 para fórmula línea 80 (con sus operadores)
-# Se construye dinámicamente en _write_f29 porque incluye línea 50 especial
-
 
 # ============================================================
-# Helpers de escritura
+# Helpers — apply fills/borders to all cols in a row
 # ============================================================
+
+def _fill_row(ws, r, fill=None, font=None, alignment=None):
+    """Apply formatting to all NCOLS cells in a row."""
+    for c in range(1, NCOLS + 1):
+        cell = ws.cell(row=r, column=c)
+        if fill: cell.fill = fill
+        if font: cell.font = font
+        if alignment: cell.alignment = alignment
+        cell.border = BD
+
 
 def _g(ws, r, text):
-    """Green section header (merged)."""
+    """Section header — full width, blue bg, centered bold."""
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=NCOLS)
-    ws.cell(row=r, column=1, value=text).font = F11BW
-    ws.cell(row=r, column=1).alignment = AC
-    for c in range(1, NCOLS + 1):
-        ws.cell(row=r, column=c).fill = FG
+    _fill_row(ws, r, fill=FB)
+    c = ws.cell(row=r, column=1, value=text)
+    c.font = F11B; c.alignment = AC
     return r + 1
 
 
 def _b(ws, r, text):
-    """Blue sub-section header (merged, left-aligned)."""
+    """Sub-section header — full width, blue bg, left-aligned."""
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=NCOLS)
-    ws.cell(row=r, column=1, value=text).font = F9B
-    ws.cell(row=r, column=1).alignment = AL
-    for c in range(1, NCOLS + 1):
-        ws.cell(row=r, column=c).fill = FB
+    _fill_row(ws, r, fill=FB)
+    c = ws.cell(row=r, column=1, value=text)
+    c.font = F9B; c.alignment = AL
     return r + 1
 
 
 def _h(ws, r, d_label='Cantidad de Documentos', f_label='Monto Neto',
        g_label='+/-', a_label='Línea', b_label='Descripción'):
-    """Column headers row (blue fill)."""
-    for c in range(1, NCOLS + 1):
-        ws.cell(row=r, column=c).fill = FB
-        ws.cell(row=r, column=c).font = F8B
-        ws.cell(row=r, column=c).alignment = AC
+    """Column headers row — blue fill, bold."""
+    _fill_row(ws, r, fill=FB, font=F8B, alignment=AC)
     if a_label:
-        ws.cell(row=r, column=1, value=a_label)
+        ws.cell(row=r, column=CA, value=a_label)
     if b_label:
-        ws.cell(row=r, column=2, value=b_label)
-    ws.cell(row=r, column=3, value='Cód')
+        ws.merge_cells(start_row=r, start_column=CB, end_row=r, end_column=DESC_2CODE[1])
+        ws.cell(row=r, column=CB, value=b_label)
+    ws.cell(row=r, column=CI, value='Cód')
     if d_label:
-        ws.cell(row=r, column=4, value=d_label)
-    ws.cell(row=r, column=5, value='Cód')
+        ws.cell(row=r, column=CJ, value=d_label)
+    ws.cell(row=r, column=CM, value='Cód')
     if f_label:
-        ws.cell(row=r, column=6, value=f_label)
+        ws.cell(row=r, column=CN, value=f_label)
     if g_label:
-        ws.cell(row=r, column=7, value=g_label)
+        ws.cell(row=r, column=CO, value=g_label)
     return r + 1
 
 
 def _h2(ws, r, b_label, d_label, f_label, g_label='+/-'):
-    """Header row with custom B column label and no A/C labels."""
-    for c in range(1, NCOLS + 1):
-        ws.cell(row=r, column=c).fill = FB
-        ws.cell(row=r, column=c).font = F8B
-        ws.cell(row=r, column=c).alignment = AC
+    """Header row with custom labels, no A label."""
+    _fill_row(ws, r, fill=FB, font=F8B, alignment=AC)
     if b_label:
-        ws.cell(row=r, column=2, value=b_label)
+        ws.merge_cells(start_row=r, start_column=CB, end_row=r, end_column=DESC_2CODE[1])
+        ws.cell(row=r, column=CB, value=b_label)
     if d_label:
-        ws.cell(row=r, column=4, value=d_label)
-    ws.cell(row=r, column=5, value='Cód')
+        ws.cell(row=r, column=CJ, value=d_label)
+    ws.cell(row=r, column=CM, value='Cód')
     if f_label:
-        ws.cell(row=r, column=6, value=f_label)
+        ws.cell(row=r, column=CN, value=f_label)
     if g_label:
-        ws.cell(row=r, column=7, value=g_label)
+        ws.cell(row=r, column=CO, value=g_label)
     return r + 1
 
 
 def _ln(ws, r, num, desc, cq, ca, op, cod, cc, bold=False):
-    """Standard data line."""
+    """Standard data line with 1 or 2 code/value pairs."""
+    _fill_row(ws, r)  # borders on all cells
+
     # Col A: line number
-    a = ws.cell(row=r, column=1, value=num)
+    a = ws.cell(row=r, column=CA, value=num)
     a.font = F8; a.fill = FE; a.alignment = AC
-    # Col B: description
-    ws.cell(row=r, column=2, value=desc).font = F8B if bold else F8
-    ws.cell(row=r, column=2).alignment = AL
-    # Col C + D: qty code + value
+
+    # Col B: description (merge range depends on whether cq exists)
     if cq is not None:
-        ws.cell(row=r, column=3, value=cq).font = F7C
-        ws.cell(row=r, column=3).fill = FE
-        ws.cell(row=r, column=3).alignment = AC
-        cc[cq] = f"D{r}"
+        ws.merge_cells(start_row=r, start_column=DESC_2CODE[0], end_row=r, end_column=DESC_2CODE[1])
+    else:
+        ws.merge_cells(start_row=r, start_column=DESC_1CODE[0], end_row=r, end_column=DESC_1CODE[1])
+    b = ws.cell(row=r, column=CB, value=desc)
+    b.font = F8B if bold else F8; b.fill = FW; b.alignment = AL
+
+    # Code left (cq) at I/J
+    if cq is not None:
+        c_cq = ws.cell(row=r, column=CI, value=cq)
+        c_cq.font = F7C; c_cq.fill = FB; c_cq.alignment = AC
+        cc[cq] = f"{get_column_letter(CJ)}{r}"
         v = cod.get(cq)
         if v:
-            d = ws.cell(row=r, column=4, value=v)
-            d.font = F11; d.alignment = AR; d.number_format = NF
-    # Col E + F: amt code + value
+            c_v = ws.cell(row=r, column=CJ, value=v)
+            c_v.font = F11; c_v.fill = FI; c_v.alignment = AR; c_v.number_format = NF
+
+    # Code right (ca) at M/N
     if ca is not None:
-        ws.cell(row=r, column=5, value=ca).font = F7C
-        ws.cell(row=r, column=5).fill = FE
-        ws.cell(row=r, column=5).alignment = AC
-        cc[ca] = f"F{r}"
+        c_ca = ws.cell(row=r, column=CM, value=ca)
+        c_ca.font = F7C; c_ca.fill = FB; c_ca.alignment = AC
+        cc[ca] = f"{get_column_letter(CN)}{r}"
         v = cod.get(ca)
         if v:
-            f = ws.cell(row=r, column=6, value=v)
-            f.font = F11; f.alignment = AR; f.number_format = NF
-    # Col G: operator
+            c_v = ws.cell(row=r, column=CN, value=v)
+            c_v.font = F11; c_v.fill = FI; c_v.alignment = AR; c_v.number_format = NF
+
+    # Sign at O
+    g = ws.cell(row=r, column=CO)
     if op:
-        ws.cell(row=r, column=7, value=op).font = F9B
-        ws.cell(row=r, column=7).alignment = AC
+        g.value = op; g.font = F9B; g.fill = FE; g.alignment = AC
+
     return r + 1
 
 
 def _wl(ws, r, lines, cod, cc):
-    """Write a list of data lines."""
+    """Write a list of standard data lines."""
     for num, desc, cq, ca, op in lines:
         r = _ln(ws, r, num, desc, cq, ca, op, cod, cc)
     return r
 
 
 def _fv(ws, r, col, formula):
-    """Write a formula value cell (LGRAY fill, 11pt, right, #,##0)."""
+    """Write a formula/value cell — calculated style (#EBEBE4)."""
     c = ws.cell(row=r, column=col, value=formula)
-    c.font = F11; c.fill = FL; c.alignment = AR; c.number_format = NF
+    c.font = F11; c.fill = FC; c.alignment = AR; c.number_format = NF; c.border = BD
     return c
 
 
 def _fl(ws, r, num, desc, ca, formula, op, cc, bold=True):
-    """Write a formula total line (no qty code)."""
-    ws.cell(row=r, column=1, value=num).font = F8
-    ws.cell(row=r, column=1).fill = FE
-    ws.cell(row=r, column=1).alignment = AC
-    ws.cell(row=r, column=2, value=desc).font = F8B if bold else F8
-    ws.cell(row=r, column=2).alignment = AL
+    """Write a formula total line — green line#, blue desc."""
+    FWB = Font(name="Arial", size=8, bold=True, color="FFFFFF")
+    _fill_row(ws, r)
+
+    # Col A: green line number
+    a = ws.cell(row=r, column=CA, value=num)
+    a.font = FWB; a.fill = FG; a.alignment = AC
+
+    # Col B-L: description
+    ws.merge_cells(start_row=r, start_column=DESC_TOTAL[0], end_row=r, end_column=DESC_TOTAL[1])
+    b = ws.cell(row=r, column=CB, value=desc)
+    b.font = F8B if bold else F8; b.fill = FB; b.alignment = AL
+
+    # Code at M
     if ca is not None:
-        ws.cell(row=r, column=5, value=ca).font = F7C
-        ws.cell(row=r, column=5).fill = FE
-        ws.cell(row=r, column=5).alignment = AC
-        cc[ca] = f"F{r}"
-    _fv(ws, r, 6, formula)
+        c5 = ws.cell(row=r, column=CM, value=ca)
+        c5.font = F7C; c5.fill = FI; c5.alignment = AC
+        cc[ca] = f"{get_column_letter(CN)}{r}"
+
+    # Formula value at N
+    _fv(ws, r, CN, formula)
+
+    # Sign at O
+    g = ws.cell(row=r, column=CO)
     if op:
-        ws.cell(row=r, column=7, value=op).font = F9B
-        ws.cell(row=r, column=7).alignment = AC
+        g.value = op; g.font = F9B; g.fill = FE; g.alignment = AC
+
+    return r + 1
+
+
+def _dual(ws, r, num, desc, code1, formula1, code2, formula2, op, cc):
+    """Write a dual-code row (e.g. line 50: remanente + IVA determinado)."""
+    _fill_row(ws, r)
+
+    ws.cell(row=r, column=CA, value=num).font = F8
+    ws.cell(row=r, column=CA).fill = FE; ws.cell(row=r, column=CA).alignment = AC
+
+    ws.merge_cells(start_row=r, start_column=DESC_2CODE[0], end_row=r, end_column=DESC_2CODE[1])
+    b = ws.cell(row=r, column=CB, value=desc)
+    b.font = F8; b.fill = FW; b.alignment = AL
+
+    # First code/value at I/J
+    ws.cell(row=r, column=CI, value=code1).font = F7C
+    ws.cell(row=r, column=CI).fill = FB; ws.cell(row=r, column=CI).alignment = AC
+    cc[code1] = f"{get_column_letter(CJ)}{r}"
+    _fv(ws, r, CJ, formula1)
+
+    # Second code/value at M/N
+    ws.cell(row=r, column=CM, value=code2).font = F7C
+    ws.cell(row=r, column=CM).fill = FB; ws.cell(row=r, column=CM).alignment = AC
+    cc[code2] = f"{get_column_letter(CN)}{r}"
+    _fv(ws, r, CN, formula2)
+
+    # Sign at O
+    if op:
+        ws.cell(row=r, column=CO, value=op).font = F9B
+        ws.cell(row=r, column=CO).fill = FE; ws.cell(row=r, column=CO).alignment = AC
+
     return r + 1
 
 
@@ -406,6 +503,137 @@ def _bf(lines, cc):
     if s.startswith("=+"):
         s = "=" + s[2:]
     return s
+
+
+# ============================================================
+# PPM section renderer
+# ============================================================
+
+def _ppm_subheader(ws, r):
+    """PPM column headers row (before line 69) — matches HTML exactly."""
+    _fill_row(ws, r, fill=FB, font=F7, alignment=AC)
+
+    # Columns C-D: Acogido a suspensión PPM
+    ws.merge_cells(start_row=r, start_column=3, end_row=r, end_column=4)
+    ws.cell(row=r, column=3, value='Acogido a suspensión PPM (Art 1°bis Ley 19.420 y 1°bis Ley 19.606)').font = F7
+    ws.cell(row=r, column=3).alignment = AC
+
+    # Columns E-F: Monto Pérdida Art. 90
+    ws.merge_cells(start_row=r, start_column=5, end_row=r, end_column=6)
+    ws.cell(row=r, column=5, value='Monto Pérdida Art. 90').font = F7
+    ws.cell(row=r, column=5).alignment = AC
+
+    # Columns G-H: Base Imponible
+    ws.merge_cells(start_row=r, start_column=7, end_row=r, end_column=8)
+    ws.cell(row=r, column=7, value='Base Imponible').font = F7
+    ws.cell(row=r, column=7).alignment = AC
+
+    # Columns I-J: Tasa
+    ws.merge_cells(start_row=r, start_column=9, end_row=r, end_column=10)
+    ws.cell(row=r, column=9, value='Tasa').font = F7
+    ws.cell(row=r, column=9).alignment = AC
+
+    # Columns K-L: Crédito / Tope Suspensión PPM
+    ws.merge_cells(start_row=r, start_column=11, end_row=r, end_column=12)
+    ws.cell(row=r, column=11, value='Crédito / Tope Suspensión PPM (Arts. 1°bis Leyes 19.420 y 19.606)').font = F7
+    ws.cell(row=r, column=11).alignment = AC
+
+    # Columns M-N: PPM Neto Determinado
+    ws.merge_cells(start_row=r, start_column=13, end_row=r, end_column=14)
+    ws.cell(row=r, column=13, value='PPM Neto Determinado').font = F7
+    ws.cell(row=r, column=13).alignment = AC
+
+    return r + 1
+
+
+def _ppm_line69(ws, r, cod, cc):
+    """PPM line 69: all 15 columns with 6 code/value pairs."""
+    _fill_row(ws, r)
+    codes = PPM_LINE69_CODES  # [750, 30, 563, 115, 68, 62]
+    desc = '1ra Categoría Art. 84 a) y 14 D N° 3 letra (k) y 8 letra (a) numeral (viii).'
+
+    # A: line number
+    ws.cell(row=r, column=1, value=69).font = F8
+    ws.cell(row=r, column=1).fill = FE; ws.cell(row=r, column=1).alignment = AC
+
+    # B: description
+    ws.cell(row=r, column=2, value=desc).font = F8
+    ws.cell(row=r, column=2).fill = FW; ws.cell(row=r, column=2).alignment = AL
+
+    # 6 code/value pairs in columns C-N (pairs at C/D, E/F, G/H, I/J, K/L, M/N)
+    col = 3
+    for i, code in enumerate(codes):
+        is_last = (i == len(codes) - 1)
+        # Code cell
+        c_code = ws.cell(row=r, column=col, value=code)
+        c_code.font = F7C; c_code.fill = FB; c_code.alignment = AC
+        col += 1
+        # Value cell
+        c_val = ws.cell(row=r, column=col)
+        cc[code] = f"{get_column_letter(col)}{r}"
+        v = cod.get(code, 0)
+        if is_last:
+            # Code 62 (PPM Neto) = Base Imponible × Tasa / 100
+            base_ref = cc.get(563, '')
+            tasa_ref = cc.get(115, '')
+            if base_ref and tasa_ref:
+                c_val.value = f"=ROUND({base_ref}*{tasa_ref}/100,0)"
+            elif v:
+                c_val.value = v
+            c_val.number_format = NF
+            c_val.font = F11; c_val.fill = FC; c_val.alignment = AR
+        elif v:
+            c_val.value = v
+            if code == 115:
+                c_val.number_format = PF  # Tasa as percentage
+            else:
+                c_val.number_format = NF
+            c_val.font = F11; c_val.fill = FI; c_val.alignment = AR
+        col += 1
+
+    # O: sign
+    ws.cell(row=r, column=CO, value='+').font = F9B
+    ws.cell(row=r, column=CO).fill = FE; ws.cell(row=r, column=CO).alignment = AC
+
+    return r + 1
+
+
+def _ppm_multi_line(ws, r, num, desc, codes, cod, cc):
+    """PPM lines 71-73: desc in B-D, 5 code/value pairs in E-N."""
+    _fill_row(ws, r)
+
+    # A: line number
+    ws.cell(row=r, column=1, value=num).font = F8
+    ws.cell(row=r, column=1).fill = FE; ws.cell(row=r, column=1).alignment = AC
+
+    # B-D merged: description
+    ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=4)
+    ws.cell(row=r, column=2, value=desc).font = F8
+    ws.cell(row=r, column=2).fill = FW; ws.cell(row=r, column=2).alignment = AL
+
+    # 5 code/value pairs in columns E-N (pairs at E/F, G/H, I/J, K/L, M/N)
+    col = 5
+    for i, code in enumerate(codes):
+        is_last = (i == len(codes) - 1)
+        c_code = ws.cell(row=r, column=col, value=code)
+        c_code.font = F7C; c_code.fill = FB; c_code.alignment = AC
+        col += 1
+        c_val = ws.cell(row=r, column=col)
+        cc[code] = f"{get_column_letter(col)}{r}"
+        v = cod.get(code, 0)
+        if v:
+            c_val.value = v
+            if is_last:
+                c_val.font = F11; c_val.fill = FC; c_val.alignment = AR; c_val.number_format = NF
+            else:
+                c_val.font = F11; c_val.fill = FI; c_val.alignment = AR; c_val.number_format = NF
+        col += 1
+
+    # O: sign
+    ws.cell(row=r, column=CO, value='+').font = F9B
+    ws.cell(row=r, column=CO).fill = FE; ws.cell(row=r, column=CO).alignment = AC
+
+    return r + 1
 
 
 # ============================================================
@@ -434,7 +662,6 @@ def calcular_f29(datos):
     def count_docs(lk): return len(docs.get(lk, []))
     def sum_field(lk, campo): return sum(d.get(campo, 0) for d in docs.get(lk, []))
 
-    # DÉBITOS
     for cq, ca, lk, fc, fn, is_iva in [
         (585, 20, "linea_1", "facturas_exportacion_cant", "facturas_exportacion_neto", False),
         (586, 142, "linea_2", "facturas_exentas_giro_cant", "facturas_exentas_giro_neto", False),
@@ -461,7 +688,6 @@ def calcular_f29(datos):
     codigos[538] = sum(codigos.get(ca, 0) * (1 if op == '+' else -1)
                        for _, _, _, ca, op in L_DEB_GENERA if op in ('+', '-'))
 
-    # CRÉDITOS
     for cq, ca, lk, fc, fi in [
         (519, 520, "linea_28", "facturas_giro_cant", "facturas_giro_iva"),
         (524, 525, "linea_31", "facturas_activo_fijo_cant", "facturas_activo_fijo_iva"),
@@ -494,12 +720,10 @@ def calcular_f29(datos):
     codigos[537] = sum(codigos.get(ca, 0) * (1 if op == '+' else -1)
                        for _, _, _, ca, op in ALL_CRED_LINES if op in ('+', '-'))
 
-    # IVA DETERMINADO
     td, tc = codigos[538], codigos[537]
     codigos[89] = max(td - tc, 0)
     codigos[77] = max(tc - td, 0)
 
-    # RETENCIONES
     codigos.setdefault(50, 0)
     if has_docs("linea_60"):
         codigos[48] = sum(d.get("iusc", d.get("iva", 0)) for d in docs["linea_60"])
@@ -513,7 +737,6 @@ def calcular_f29(datos):
     for k in [49, 155, 54, 56, 588, 589, 751]:
         codigos.setdefault(k, 0)
 
-    # PPM
     tasa_ppm = ppm.get("tasa", 0.25)
     codigos[115] = tasa_ppm
     codigos.setdefault(750, 0)
@@ -538,12 +761,10 @@ def calcular_f29(datos):
     codigos[723] = min(sence, codigos[62])
     codigos[724] = sence - codigos[723]
 
-    # SUB TOTAL (línea 80)
     total_ret = sum(codigos.get(ca, 0) for _, _, _, ca, _ in L_RET)
     ppm_neto = codigos[62] - codigos[723]
     codigos[595] = codigos[89] + total_ret + ppm_neto
 
-    # CAMBIO DE SUJETO
     codigos[39] = cs.get("iva_retenido_total", cs.get(39, 0))
     codigos[554] = cs.get("iva_parcial_retenido", cs.get(554, 0))
     codigos[736] = cs.get("iva_retenido_nc", cs.get(736, 0))
@@ -552,7 +773,6 @@ def calcular_f29(datos):
     if codigos[596] == 0 and codigos[39] > 0:
         codigos[596] = codigos[39] + codigos.get(554, 0) - codigos[736] + codigos.get(597, 0)
 
-    # TOTAL
     codigos[547] = codigos[595] + codigos.get(596, 0)
     codigos[91] = codigos[547]
     codigos[92] = 0; codigos[93] = 0
@@ -565,20 +785,19 @@ def calcular_f29(datos):
 # ============================================================
 
 def _write_f29(wb, codigos, enc):
-    """Hoja 1: F29 completo (194 filas) con fórmulas."""
     mes = enc.get("periodo_mes", 1)
     anio = enc.get("periodo_anio", 2026)
     ws = wb.active
     ws.title = f"F29 — {MESES.get(mes)} {anio}"
 
-    for letter, width in [('A', 6), ('B', 55), ('C', 7), ('D', 18), ('E', 7), ('F', 18), ('G', 4)]:
+    for letter, width in COL_WIDTHS:
         ws.column_dimensions[letter].width = width
 
     cod = codigos
-    cc = {}  # code -> cell ref
+    cc = {}
     r = 1
 
-    # --- TÍTULO Y ENCABEZADO ---
+    # --- TÍTULO ---
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=NCOLS)
     ws.cell(row=r, column=1, value='DECLARACIÓN MENSUAL Y PAGO SIMULTÁNEO DE IMPUESTOS - FORMULARIO 29').font = F14B
     ws.cell(row=r, column=1).alignment = AC
@@ -603,7 +822,6 @@ def _write_f29(wb, codigos, enc):
     r = _h(ws, r, 'Cantidad de Documentos', 'Débito', b_label='GENERA DÉBITO')
     r = _wl(ws, r, L_DEB_GENERA, cod, cc)
 
-    # Línea 23: TOTAL DÉBITOS
     r = _fl(ws, r, 23, 'TOTAL DÉBITOS', 538, _bf(L_DEB_GENERA, cc), '=', cc, bold=True)
 
     # --- CRÉDITOS Y COMPRAS ---
@@ -630,45 +848,27 @@ def _write_f29(wb, codigos, enc):
     r = _wl(ws, r, L_CRED_IEPD, cod, cc)
     r = _wl(ws, r, L_CRED_OTROS, cod, cc)
 
-    # Línea 49: TOTAL CRÉDITOS
     r = _fl(ws, r, 49, 'TOTAL CRÉDITOS', 537, _bf(ALL_CRED_LINES, cc), '=', cc, bold=True)
 
     # --- POSTERGACIÓN DE IVA ---
     r = _h2(ws, r, 'POSTERGACIÓN DE IVA', 'Remanente CF', 'Impuesto Determinado')
 
-    # Línea 50: ESPECIAL — dual codes (77 en C/D, 89 en E/F)
+    # Línea 50: dual codes (77 remanente / 89 IVA determinado)
     ref_538 = cc.get(538, '0')
     ref_537 = cc.get(537, '0')
-    ws.cell(row=r, column=1, value=50).font = F8
-    ws.cell(row=r, column=1).fill = FE; ws.cell(row=r, column=1).alignment = AC
-    ws.cell(row=r, column=2, value='Remanente de crédito fiscal para el período siguiente').font = F8
-    ws.cell(row=r, column=2).alignment = AL
-    ws.cell(row=r, column=3, value=77).font = F7C
-    ws.cell(row=r, column=3).fill = FE; ws.cell(row=r, column=3).alignment = AC
-    cc[77] = f"D{r}"
-    _fv(ws, r, 4, f'=IF({ref_537}>{ref_538},{ref_537}-{ref_538},0)')
-    ws.cell(row=r, column=5, value=89).font = F7C
-    ws.cell(row=r, column=5).fill = FE; ws.cell(row=r, column=5).alignment = AC
-    cc[89] = f"F{r}"
-    _fv(ws, r, 6, f'=IF({ref_538}>{ref_537},{ref_538}-{ref_537},0)')
-    ws.cell(row=r, column=7, value='+').font = F9B
-    ws.cell(row=r, column=7).alignment = AC
-    r += 1
+    r = _dual(ws, r, 50, 'Remanente de crédito fiscal para el período siguiente',
+              77, f'=IF({ref_537}>{ref_538},{ref_537}-{ref_538},0)',
+              89, f'=IF({ref_538}>{ref_537},{ref_538}-{ref_537},0)', '+', cc)
 
-    # Línea 51
     r = _wl(ws, r, L_POST_51, cod, cc)
 
-    # Postergación IVA en cuotas
-    # Header especial con C:D merged
-    for c in range(1, NCOLS + 1):
-        ws.cell(row=r, column=c).fill = FB
-        ws.cell(row=r, column=c).font = F8B
-        ws.cell(row=r, column=c).alignment = AC
-    ws.merge_cells(start_row=r, start_column=3, end_row=r, end_column=4)
-    ws.cell(row=r, column=2, value='POSTERGACIÓN IVA EN CUOTAS (D.S. 420/997 MH)')
-    ws.cell(row=r, column=5, value='Cód')
-    ws.cell(row=r, column=6, value='Imp. Determinado')
-    ws.cell(row=r, column=7, value='+/-')
+    # Postergación IVA en cuotas — header
+    _fill_row(ws, r, fill=FB, font=F8B, alignment=AC)
+    ws.merge_cells(start_row=r, start_column=CB, end_row=r, end_column=DESC_2CODE[1])
+    ws.cell(row=r, column=CB, value='POSTERGACIÓN IVA EN CUOTAS (D.S. 420/997 MH)')
+    ws.cell(row=r, column=CM, value='Cód')
+    ws.cell(row=r, column=CN, value='Imp. Determinado')
+    ws.cell(row=r, column=CO, value='+/-')
     r += 1
     r = _wl(ws, r, L_POST_CUOTAS, cod, cc)
 
@@ -678,61 +878,45 @@ def _write_f29(wb, codigos, enc):
     r = _h(ws, r, d_label=None, f_label='Impuesto Determinado', a_label='Línea', b_label='Descripción')
     r = _wl(ws, r, L_RET, cod, cc)
 
-    # PPM
+    # --- PPM ---
     r = _b(ws, r, 'PPM')
-    r = _h(ws, r, 'Base Imponible / Tasa', 'PPM Determinado')
-    # Para línea 69: escribir base imponible en D (code 563 interno)
-    for num, desc, cq, ca, op in L_PPM:
-        if num == 69:
-            # Línea especial: D = base imponible, F = PPM
-            ws.cell(row=r, column=1, value=69).font = F8
-            ws.cell(row=r, column=1).fill = FE; ws.cell(row=r, column=1).alignment = AC
-            ws.cell(row=r, column=2, value=desc).font = F8
-            ws.cell(row=r, column=2).alignment = AL
-            ws.cell(row=r, column=3, value=750).font = F7C
-            ws.cell(row=r, column=3).fill = FE; ws.cell(row=r, column=3).alignment = AC
-            cc[750] = f"D{r}"
-            # Escribir base imponible en D
-            base = cod.get(563, 0)
-            if base:
-                d = ws.cell(row=r, column=4, value=base)
-                d.font = F11; d.alignment = AR; d.number_format = NF
-            ws.cell(row=r, column=5, value=62).font = F7C
-            ws.cell(row=r, column=5).fill = FE; ws.cell(row=r, column=5).alignment = AC
-            cc[62] = f"F{r}"
-            v = cod.get(62, 0)
-            if v:
-                f = ws.cell(row=r, column=6, value=v)
-                f.font = F11; f.alignment = AR; f.number_format = NF
-            ws.cell(row=r, column=7, value='+').font = F9B
-            ws.cell(row=r, column=7).alignment = AC
-            r += 1
+    r = _ppm_subheader(ws, r)
+
+    # Line 69: special 15-column layout
+    r = _ppm_line69(ws, r, cod, cc)
+
+    # Line 70: standard 1-code
+    r = _ln(ws, r, 70, '1ra Cat. Art. 84 a) tasa 3%, reintegro préstamo tasa 0%', None, 156, '+', cod, cc)
+
+    # Lines 71-73: multi-column
+    for num, desc, cq, ca, op in L_PPM[2:5]:  # lines 71, 72, 73
+        codes = PPM_MULTI.get(num)
+        if codes:
+            r = _ppm_multi_line(ws, r, num, desc, codes, cod, cc)
         else:
             r = _ln(ws, r, num, desc, cq, ca, op, cod, cc)
 
+    # Lines 74-79: standard layout
+    for num, desc, cq, ca, op in L_PPM[5:]:
+        r = _ln(ws, r, num, desc, cq, ca, op, cod, cc)
+
     # Línea 80: SUB TOTAL
-    # Fórmula dinámica: IVA det + postergación + retenciones + PPM (con signos)
     line80_parts = []
-    # IVA determinado (línea 50)
     ref_89 = cc.get(89)
     if ref_89:
         line80_parts.append(ref_89)
-    # Línea 51
     for _, _, _, ca, op in L_POST_51:
         ref = cc.get(ca)
         if ref and op in ('+', '-'):
             line80_parts.append(f"{op}{ref}")
-    # Líneas 52-58
     for _, _, _, ca, op in L_POST_CUOTAS:
         ref = cc.get(ca)
         if ref and op in ('+', '-'):
             line80_parts.append(f"{op}{ref}")
-    # Retenciones 59-68
     for _, _, _, ca, op in L_RET:
         ref = cc.get(ca)
         if ref and op in ('+', '-'):
             line80_parts.append(f"{op}{ref}")
-    # PPM 69-79
     for _, _, _, ca, op in L_PPM:
         ref = cc.get(ca)
         if ref and op in ('+', '-'):
@@ -753,84 +937,54 @@ def _write_f29(wb, codigos, enc):
     r = _h(ws, r, d_label=None, f_label='Impuesto Determinado')
     r = _wl(ws, r, L_ART37, cod, cc)
 
-    # Línea 91: dual codes (549/D=remanente, 550/F=impuesto)
+    # Línea 91 Art37: dual codes (549 remanente / 550 impuesto)
     art37_formula = _bf(L_ART37, cc)
-    ws.cell(row=r, column=1, value=91).font = F8
-    ws.cell(row=r, column=1).fill = FE; ws.cell(row=r, column=1).alignment = AC
-    ws.cell(row=r, column=2, value='Remanente crédito impuesto Art.37 para período siguiente').font = F8
-    ws.cell(row=r, column=2).alignment = AL
-    ws.cell(row=r, column=3, value=549).font = F7C
-    ws.cell(row=r, column=3).fill = FE; ws.cell(row=r, column=3).alignment = AC
-    cc[549] = f"D{r}"
-    # D = IF(sum>=0, sum, 0) — impuesto
-    inner = art37_formula[1:]  # remove leading =
-    _fv(ws, r, 4, f'=IF(({inner})>=0,{inner},0)')
-    ws.cell(row=r, column=5, value=550).font = F7C
-    ws.cell(row=r, column=5).fill = FE; ws.cell(row=r, column=5).alignment = AC
-    cc[550] = f"F{r}"
-    # F = IF(sum<0, ABS(sum), 0) — remanente
-    _fv(ws, r, 6, f'=IF(({inner})<0,ABS({inner}),0)')
-    ws.cell(row=r, column=7, value='+').font = F9B
-    ws.cell(row=r, column=7).alignment = AC
-    r += 1
+    inner = art37_formula[1:]
+    r = _dual(ws, r, 91, 'Remanente crédito impuesto Art.37 para período siguiente',
+              549, f'=IF(({inner})>=0,{inner},0)',
+              550, f'=IF(({inner})<0,ABS({inner}),0)', '+', cc)
 
     # --- IMPUESTO ADICIONAL ART. 42 ---
     r = _g(ws, r, 'IMPUESTO ADICIONAL ART. 42 D.L. 825')
     r = _h2(ws, r, 'DÉBITOS', None, 'Débito')
     r = _wl(ws, r, L_ART42_DEB, cod, cc)
-
-    # Línea 100: Total Débitos Art 42
     r = _fl(ws, r, 100, 'Total Débitos Art. 42 DL 825', 602, _bf(L_ART42_DEB, cc), '=', cc, bold=True)
 
     r = _h2(ws, r, 'CRÉDITOS', 'Total Crédito Recargado Facturas Recibidas', 'Crédito Imputable del Periodo')
     r = _wl(ws, r, L_ART42_CRED, cod, cc)
-
-    # Línea 111: Total Créditos Art 42
     r = _fl(ws, r, 111, 'Total créditos Art.42 DL 825', 603, _bf(L_ART42_CRED, cc), '=', cc, bold=True)
 
-    # Línea 112: dual codes (507/D=remanente, 506/F=impuesto)
+    # Línea 112: dual codes (507 remanente / 506 impuesto)
     ref_602 = cc.get(602, '0')
     ref_603 = cc.get(603, '0')
-    ws.cell(row=r, column=1, value=112).font = F8
-    ws.cell(row=r, column=1).fill = FE; ws.cell(row=r, column=1).alignment = AC
-    ws.cell(row=r, column=2, value='Remanente crédito Imp. Adic. Art.42 para período siguiente').font = F8
-    ws.cell(row=r, column=2).alignment = AL
-    ws.cell(row=r, column=3, value=507).font = F7C
-    ws.cell(row=r, column=3).fill = FE; ws.cell(row=r, column=3).alignment = AC
-    cc[507] = f"D{r}"
-    _fv(ws, r, 4, f'=IF({ref_602}>{ref_603},{ref_602}-{ref_603},0)')
-    ws.cell(row=r, column=5, value=506).font = F7C
-    ws.cell(row=r, column=5).fill = FE; ws.cell(row=r, column=5).alignment = AC
-    cc[506] = f"F{r}"
-    _fv(ws, r, 6, f'=IF({ref_603}>{ref_602},{ref_603}-{ref_602},0)')
-    ws.cell(row=r, column=7, value='+').font = F9B
-    ws.cell(row=r, column=7).alignment = AC
-    r += 1
+    r = _dual(ws, r, 112, 'Remanente crédito Imp. Adic. Art.42 para período siguiente',
+              507, f'=IF({ref_602}>{ref_603},{ref_602}-{ref_603},0)',
+              506, f'=IF({ref_603}>{ref_602},{ref_603}-{ref_602},0)', '+', cc)
 
     # --- CAMBIO DE SUJETO ---
     r = _g(ws, r, 'CAMBIO DE SUJETO D.L. 825')
     r = _b(ws, r, 'ANTICIPO CAMBIO DE SUJETO (CONTRIBUYENTES RETENIDOS)')
     r = _h(ws, r, d_label=None, f_label='Monto')
     r = _wl(ws, r, L_ANTICIPO_CS, cod, cc)
-
-    # Línea 116: Total Anticipo
     r = _fl(ws, r, 116, 'Total de Anticipo', 543, _bf(L_ANTICIPO_CS, cc), '=', cc, bold=True)
 
-    # Línea 117: Remanente Anticipos
-    ws.cell(row=r, column=1, value=117).font = F8
-    ws.cell(row=r, column=1).fill = FE; ws.cell(row=r, column=1).alignment = AC
-    ws.cell(row=r, column=2, value='Remanente Anticipos Cambio Sujeto para período siguiente').font = F8
-    ws.cell(row=r, column=2).alignment = AL
-    ws.cell(row=r, column=3, value=573).font = F7C
-    ws.cell(row=r, column=3).fill = FE; ws.cell(row=r, column=3).alignment = AC
-    cc[573] = f"D{r}"
-    ws.cell(row=r, column=5, value=598).font = F7C
-    ws.cell(row=r, column=5).fill = FE; ws.cell(row=r, column=5).alignment = AC
-    cc[598] = f"F{r}"
+    # Línea 117: dual codes (573 remanente / 598 anticipo)
     ref_543 = cc.get(543, '0')
-    _fv(ws, r, 6, f'=IF({ref_543}<0,ABS({ref_543}),0)')
-    ws.cell(row=r, column=7, value='-').font = F9B
-    ws.cell(row=r, column=7).alignment = AC
+    _fill_row(ws, r)
+    ws.cell(row=r, column=CA, value=117).font = F8
+    ws.cell(row=r, column=CA).fill = FE; ws.cell(row=r, column=CA).alignment = AC
+    ws.merge_cells(start_row=r, start_column=DESC_2CODE[0], end_row=r, end_column=DESC_2CODE[1])
+    ws.cell(row=r, column=CB, value='Remanente Anticipos Cambio Sujeto para período siguiente').font = F8
+    ws.cell(row=r, column=CB).fill = FW; ws.cell(row=r, column=CB).alignment = AL
+    ws.cell(row=r, column=CI, value=573).font = F7C
+    ws.cell(row=r, column=CI).fill = FB; ws.cell(row=r, column=CI).alignment = AC
+    cc[573] = f"{get_column_letter(CJ)}{r}"
+    ws.cell(row=r, column=CM, value=598).font = F7C
+    ws.cell(row=r, column=CM).fill = FB; ws.cell(row=r, column=CM).alignment = AC
+    cc[598] = f"{get_column_letter(CN)}{r}"
+    _fv(ws, r, CN, f'=IF({ref_543}<0,ABS({ref_543}),0)')
+    ws.cell(row=r, column=CO, value='-').font = F9B
+    ws.cell(row=r, column=CO).fill = FE; ws.cell(row=r, column=CO).alignment = AC
     r += 1
 
     # CAMBIO DE SUJETO (AGENTE RETENEDOR)
@@ -840,43 +994,43 @@ def _write_f29(wb, codigos, enc):
     # CAMBIO ESPECIAL DE SUJETO
     r = _b(ws, r, 'CAMBIO ESPECIAL DE SUJETO (Inciso 7º, Art. 3º D.L. 825)')
     r = _wl(ws, r, L_CS_ESPECIAL, cod, cc)
-
-    # Línea 126: Monto neto IVA retenido
     r = _fl(ws, r, 126, 'Monto neto de IVA retenido en el período', 103, _bf(L_CS_ESPECIAL, cc), '=', cc, bold=True)
 
-    # Línea 127: Remanente ajuste
-    ws.cell(row=r, column=1, value=127).font = F8
-    ws.cell(row=r, column=1).fill = FE; ws.cell(row=r, column=1).alignment = AC
-    ws.cell(row=r, column=2, value='Remanente de ajuste para el próximo período').font = F8
-    ws.cell(row=r, column=2).alignment = AL
-    ws.cell(row=r, column=5, value=104).font = F7C
-    ws.cell(row=r, column=5).fill = FE; ws.cell(row=r, column=5).alignment = AC
-    cc[104] = f"F{r}"
+    # Línea 127: remanente ajuste
+    _fill_row(ws, r)
+    ws.cell(row=r, column=CA, value=127).font = F8
+    ws.cell(row=r, column=CA).fill = FE; ws.cell(row=r, column=CA).alignment = AC
+    ws.merge_cells(start_row=r, start_column=DESC_1CODE[0], end_row=r, end_column=DESC_1CODE[1])
+    ws.cell(row=r, column=CB, value='Remanente de ajuste para el próximo período').font = F8
+    ws.cell(row=r, column=CB).fill = FW; ws.cell(row=r, column=CB).alignment = AL
+    ws.cell(row=r, column=CM, value=104).font = F7C
+    ws.cell(row=r, column=CM).fill = FB; ws.cell(row=r, column=CM).alignment = AC
+    cc[104] = f"{get_column_letter(CN)}{r}"
     ref_103 = cc.get(103, '0')
-    _fv(ws, r, 6, f'=IF({ref_103}<0,ABS({ref_103}),0)')
-    ws.cell(row=r, column=7, value='=').font = F9B
-    ws.cell(row=r, column=7).alignment = AC
+    _fv(ws, r, CN, f'=IF({ref_103}<0,ABS({ref_103}),0)')
+    ws.cell(row=r, column=CO, value='=').font = F9B
+    ws.cell(row=r, column=CO).fill = FE; ws.cell(row=r, column=CO).alignment = AC
     r += 1
 
     # IVA POR VENTA REMOTA
     r = _b(ws, r, 'IVA POR LA VENTA REMOTA DE BIENES CORPORALES MUEBLES (Art. 3° bis e inciso final del art. 4°, D.L. 825)')
     r = _wl(ws, r, L_VENTA_REMOTA, cod, cc)
-
-    # Línea 131: Monto neto venta remota
     r = _fl(ws, r, 131, 'Monto neto de IVA del período', 814, _bf(L_VENTA_REMOTA, cc), '=', cc, bold=True)
 
-    # Línea 132: Remanente venta remota
-    ws.cell(row=r, column=1, value=132).font = F8
-    ws.cell(row=r, column=1).fill = FE; ws.cell(row=r, column=1).alignment = AC
-    ws.cell(row=r, column=2, value='Remanente de ajuste para el próximo período').font = F8
-    ws.cell(row=r, column=2).alignment = AL
-    ws.cell(row=r, column=5, value=815).font = F7C
-    ws.cell(row=r, column=5).fill = FE; ws.cell(row=r, column=5).alignment = AC
-    cc[815] = f"F{r}"
+    # Línea 132: remanente venta remota
+    _fill_row(ws, r)
+    ws.cell(row=r, column=CA, value=132).font = F8
+    ws.cell(row=r, column=CA).fill = FE; ws.cell(row=r, column=CA).alignment = AC
+    ws.merge_cells(start_row=r, start_column=DESC_1CODE[0], end_row=r, end_column=DESC_1CODE[1])
+    ws.cell(row=r, column=CB, value='Remanente de ajuste para el próximo período').font = F8
+    ws.cell(row=r, column=CB).fill = FW; ws.cell(row=r, column=CB).alignment = AL
+    ws.cell(row=r, column=CM, value=815).font = F7C
+    ws.cell(row=r, column=CM).fill = FB; ws.cell(row=r, column=CM).alignment = AC
+    cc[815] = f"{get_column_letter(CN)}{r}"
     ref_814 = cc.get(814, '0')
-    _fv(ws, r, 6, f'=IF({ref_814}<0,ABS({ref_814}),0)')
-    ws.cell(row=r, column=7, value='=').font = F9B
-    ws.cell(row=r, column=7).alignment = AC
+    _fv(ws, r, CN, f'=IF({ref_814}<0,ABS({ref_814}),0)')
+    ws.cell(row=r, column=CO, value='=').font = F9B
+    ws.cell(row=r, column=CO).fill = FE; ws.cell(row=r, column=CO).alignment = AC
     r += 1
 
     # IMPUESTO SUSTITUTIVO
@@ -890,7 +1044,6 @@ def _write_f29(wb, codigos, enc):
     r = _wl(ws, r, L_CRED_ESP, cod, cc)
 
     # --- LÍNEA 140: TOTAL DETERMINADO ---
-    # Fórmula compleja: F105 + F110 + D120 + D144 + IF(F151>0,F151,0) + ...
     ref_595 = cc.get(595, '0')
     ref_409 = cc.get(409, '0')
     ref_549 = cc.get(549, '0')
@@ -898,10 +1051,11 @@ def _write_f29(wb, codigos, enc):
     ref_543_2 = cc.get(543, '0')
     parts_140 = [ref_595, f"+{ref_409}", f"+{ref_549}", f"+{ref_507}"]
     parts_140.append(f"+IF({ref_543_2}>0,{ref_543_2},0)")
-    for _, _, _, ca, op in L_CS_AGENTE:
-        ref = cc.get(ca)
-        if ref and op in ('+', '-'):
-            parts_140.append(f"{op}{ref}")
+    # Cambio de sujeto agente retenedor: usar solo código 596 (retención neta),
+    # NO los componentes individuales (39, 554, 736, 597) que ya están sumados en 596.
+    ref_596 = cc.get(596)
+    if ref_596:
+        parts_140.append(f"+{ref_596}")
     ref_103_2 = cc.get(103, '0')
     parts_140.append(f"+IF({ref_103_2}>0,{ref_103_2},0)")
     ref_814_2 = cc.get(814, '0')
@@ -929,11 +1083,14 @@ def _write_f29(wb, codigos, enc):
     r = _ln(ws, r, 149, 'Más Intereses y multas', None, 93, '+', cod, cc)
 
     # Condonación
-    ws.cell(row=r, column=2, value='Condonación').font = F8
-    ws.cell(row=r, column=2).alignment = AL
-    ws.cell(row=r, column=5, value=60).font = F7C
-    ws.cell(row=r, column=5).fill = FE; ws.cell(row=r, column=5).alignment = AC
-    cc[60] = f"F{r}"
+    _fill_row(ws, r)
+    ws.cell(row=r, column=CA).fill = FE; ws.cell(row=r, column=CA).alignment = AC
+    ws.merge_cells(start_row=r, start_column=DESC_1CODE[0], end_row=r, end_column=DESC_1CODE[1])
+    ws.cell(row=r, column=CB, value='Condonación').font = F8
+    ws.cell(row=r, column=CB).fill = FW; ws.cell(row=r, column=CB).alignment = AL
+    ws.cell(row=r, column=CM, value=60).font = F7C
+    ws.cell(row=r, column=CM).fill = FB; ws.cell(row=r, column=CM).alignment = AC
+    cc[60] = f"{get_column_letter(CN)}{r}"
     r += 1
 
     # Línea 150: TOTAL CON RECARGO
@@ -1003,7 +1160,6 @@ def _get_doc_values(doc, seccion, lk):
 
 
 def _write_detalle(wb, datos, codigos=None):
-    """Hoja 2: Detalle de documentos por línea con fórmulas en totales."""
     docs = datos.get("documentos", {})
     if not docs:
         ws = wb.create_sheet(title="Detalle Documentos")
@@ -1114,7 +1270,6 @@ def _write_detalle(wb, datos, codigos=None):
 # ============================================================
 
 def _write_alertas(wb, codigos, datos):
-    """Hoja 3: Alertas y notas."""
     enc = datos.get("encabezado", {})
     notas = datos.get("notas", [])
     ws = wb.create_sheet(title="Alertas y Notas")
@@ -1179,7 +1334,6 @@ def _write_alertas(wb, codigos, datos):
 # ============================================================
 
 def generar_f29_excel(datos, output_path):
-    """Genera Excel del F29 con 3 hojas."""
     codigos = calcular_f29(datos)
     enc = datos.get("encabezado", {})
     wb = openpyxl.Workbook()

@@ -311,20 +311,63 @@ o corrección antes de continuar.
 
 ### Paso 5 — Generar el archivo Excel
 
-Usar el script `scripts/generar_f29.py` para crear un archivo Excel formateado que replica
-la estructura visual del F29 del SII, con:
+**IMPORTANTE**: Usar SIEMPRE el script `scripts/generar_f29.py` y su función `generar_f29_excel(datos, output_path)`.
+Este script replica exactamente la estructura del formulario F29 oficial del SII (ver `f29-ejemplo.xlsx` como
+referencia visual del formato esperado). **NUNCA generar un Excel con formato custom o inventado.**
 
-- Encabezado con RUT, período tributario, razón social
-- Sección de Débito Fiscal (líneas 1–23) con códigos y valores
-- Sección de Crédito Fiscal (líneas 24–49)
-- Determinación del IVA (línea 50)
-- Retenciones e Impuesto Único (líneas 59–68)
-- PPM (líneas 69–78)
-- Total a pagar (líneas 141–144)
-- Hoja adicional con resumen ejecutivo y detalle de cálculos
-- Hoja con alertas y observaciones
+El script genera un workbook con 3 hojas:
+1. **F29**: Réplica completa del formulario oficial (150 líneas, colores verde/azul/gris, fórmulas Excel)
+2. **Detalle Documentos**: Desglose de cada línea con los documentos individuales
+3. **Alertas y Notas**: Validaciones, advertencias y notas relevantes
 
-Copiar el resultado a `/mnt/user-data/outputs/` y presentar al usuario.
+#### Cómo llamar al script
+
+```python
+import sys
+sys.path.insert(0, "/ruta/al/repo/.claude/skills/f29-sii-chile")
+from scripts.generar_f29 import generar_f29_excel
+
+datos = {
+    "encabezado": {
+        "rut": "78.033.706-0",
+        "razon_social": "TOTOMENU SPA",
+        "periodo_mes": 1,
+        "periodo_anio": 2026,
+        "folio": "________",
+    },
+    # Opción A: pasar códigos directamente (si ya están calculados)
+    "codigos": {
+        503: 9, 502: 1486239, 538: 1486239,
+        519: 28, 520: 505218, 527: 1, 528: 4309, 504: 0, 537: 500909,
+        # ... etc
+    },
+    # Opción B: pasar datos desglosados (ventas, compras, etc.) y dejar que calcular_f29() los procese
+    # "ventas": { ... }, "compras": { ... }, "retenciones": { ... }, "ppm": { ... },
+
+    # Documentos individuales para la hoja de detalle (opcional pero recomendado)
+    "documentos": {
+        "linea_7": [ {"numero": "F-116", "fecha": "02/01/2026", ...}, ... ],
+        "linea_28": [ ... ],
+        # etc
+    },
+    # Notas adicionales para la hoja de alertas
+    "notas": [
+        ("NOTA", "15 de 21 FCs tienen fecha dic 2025 pero emisión SII en enero"),
+    ],
+}
+
+codigos = generar_f29_excel(datos, "/ruta/output/F29-Enero-2026.xlsx")
+```
+
+#### Referencia visual: `f29-ejemplo.xlsx`
+
+El archivo `f29-ejemplo.xlsx` en este directorio contiene un ejemplo del formato de salida esperado.
+Usa los mismos colores, estructura y fórmulas que el script produce:
+- Headers verdes (#73B464) para secciones principales
+- Sub-headers azules (#D9EDF7) para subsecciones
+- Filas de datos con fondo gris (#E8E8E8) en columna de línea/código
+- Celdas de fórmula con fondo gris claro (#EEEEEE)
+- 7 columnas: Línea, Descripción, Cód, Cantidad/Base, Cód, Monto/Valor, +/-
 
 ---
 
