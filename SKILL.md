@@ -101,14 +101,28 @@ Columnas típicas:
 | Tipo Doc RCV | Descripción | Códigos F29 |
 |-------------|-------------|-------------|
 | 33 | Factura recibida (del giro) | 519 (cantidad), 520 (IVA) |
-| 46 | Factura de Compra (cambio sujeto) | 515 (cantidad), 587 (IVA retenido) → también suma a 520 |
+| 46 | Factura de Compra (cambio sujeto) | **Línea 28**: 519 (cantidad), 520 (IVA como crédito fiscal) + **Línea 118**: 39 (IVA retenido) → 596 (retención neta) |
 | 61 | NC recibida | 527 (cantidad), 528 (IVA) |
 | 56 | ND recibida | 531 (cantidad), 532 (IVA) |
 
-> **IMPORTANTE sobre FC (tipo 46)**: Las Facturas de Compra tienen doble efecto:
-> - Se registran como IVA Retenido (débito): código 596 = suma IVA de todas las FC
-> - Se registran como Crédito Fiscal: código 520 incluye el IVA de las FC
-> - Efecto neto = $0, pero ambos registros son obligatorios
+> **IMPORTANTE sobre FC (tipo 46) — Doble efecto (3 registros obligatorios)**:
+>
+> Cuando la empresa emite una FC como **agente retenedor** (caso TOTOMENU con proveedores extranjeros):
+>
+> 1. **Crédito fiscal (línea 28)**: El IVA de la FC se suma al código 520 junto con las facturas
+>    chilenas recibidas. La cantidad se suma al código 519. Esto reduce el IVA a pagar.
+>
+> 2. **Retención cambio de sujeto (líneas 118-122)**: El mismo IVA se declara como retención
+>    en código 39 (IVA total retenido). Menos NC de compra (código 736). El neto va en
+>    código 596 (retención neta). **Este monto se paga al SII obligatoriamente.**
+>
+> 3. **Informativo (línea 5)**: Código 515/587 es solo para "contribuyentes retenidos" (el
+>    vendedor al que le retuvieron IVA). **NO es donde el agente retenedor registra sus FC.**
+>
+> **Resultado**: El crédito fiscal (520) reduce el IVA de ventas, pero la retención (596)
+> se paga aparte. No se compensan entre sí. El efecto neto en IVA es $0 a largo plazo
+> (el crédito se usa contra débitos futuros), pero el flujo de caja del mes sí se ve
+> afectado porque la retención se paga inmediatamente.
 
 ### Procedimiento cuando se tiene el RCV
 
@@ -217,7 +231,7 @@ df = pd.read_csv("libro_ventas.csv")
 - Facturas de activo fijo → códigos 524/525
 - Notas de crédito recibidas → códigos 527/528
 - Notas de débito recibidas → códigos 531/532
-- Facturas de compra (servicios digitales extranjeros) → códigos 515/587
+- Facturas de compra (servicios remotos extranjeros) → crédito en 519/520 + retención en 39/596
 - Compras sin derecho a crédito → códigos 564/521 (informativo)
 
 #### Del Libro de Remuneraciones:
@@ -387,12 +401,32 @@ Usa los mismos colores, estructura y fórmulas que el script produce:
 
 ### Servicios digitales extranjeros (AWS, Azure, Google Cloud, etc.)
 
-Desde 2020 (Ley 21.210), la empresa chilena debe:
+Desde 2020 (Ley 21.210, actualizada por Ley 21.713 en nov 2024), la empresa chilena debe:
 1. Emitir **Factura de Compra (tipo 46)** al proveedor extranjero
-2. Retener el IVA (19% sobre el monto pagado)
-3. Registrar como débito fiscal en línea 5 (códigos 515/587)
-4. Registrar simultáneamente como crédito fiscal en línea 28 (código 520)
-5. Efecto neto = $0, pero AMBOS registros deben existir
+2. Retener el IVA (19% sobre el monto neto en CLP)
+3. Registrar como **crédito fiscal en línea 28** (códigos 519/520)
+4. Registrar como **retención en línea 118** (código 39) → neto en código 596
+5. La retención (596) se **paga al SII**; el crédito (520) reduce el IVA de ventas
+6. **NO** registrar en línea 5 (515/587) — esa línea es para contribuyentes retenidos
+
+> **Excepción**: Si el proveedor extranjero ya cobra IVA chileno (19%) en su invoice
+> (ej: Anthropic/Claude desde 2025), **NO requiere FC**. El IVA ya está declarado.
+
+> **Ley 21.713 (nov 2024)**: Amplió de "servicios digitales" a **"todos los servicios
+> remotos"** prestados por no residentes. Desde oct 2025, todos los proveedores
+> extranjeros deben inscribirse en el régimen simplificado del SII.
+
+### Liquidación Factura vs Factura de Compra
+
+Son documentos completamente distintos. No confundir:
+
+| Aspecto | Factura de Compra (tipo 46) | Liquidación Factura (tipo 43) |
+|---------|---------------------------|------------------------------|
+| Quién emite | El **comprador** | El comisionista/consignatario |
+| Cuándo se usa | Compras a proveedores sin factura (extranjeros, informales) | Operaciones de consignación/mandato |
+| Propósito | Documentar compra + retener IVA | Liquidar ventas por cuenta de tercero |
+| Códigos F29 | 519/520 (crédito) + 39/596 (retención) | 500/501 (débito) |
+| Relevancia software | **SÍ** — proveedores SaaS extranjeros | **NO** — no aplica habitualmente |
 
 ### Tasas de PPM por régimen tributario
 
@@ -496,7 +530,7 @@ datos["documentos"] = {
     "linea_1": [],   # Facturas de exportación
     "linea_28": [],  # Facturas recibidas (compras)
     "linea_31": [],  # Facturas activo fijo
-    "linea_5": [],   # Facturas de compra (serv. digitales)
+    "linea_118": [],  # Retención cambio de sujeto (FC serv. remotos → cod 39/596)
     "linea_12": [],  # Notas de débito emitidas
     "linea_61": [    # Boletas de honorarios → campos: bruto, retencion, liquido
         {

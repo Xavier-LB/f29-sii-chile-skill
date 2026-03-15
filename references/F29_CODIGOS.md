@@ -21,7 +21,7 @@
 | 2 | 586 | 142 | Ventas y/o servicios exentos del giro | Sociedades de profesionales exentas Art. 12 E N°8. |
 | 3 | 731 | 732 | Ventas con retención sobre margen (contribuyente retenido) | No aplica habitualmente a software. |
 | 4 | 714 | 715 | Ventas exentas que NO son del giro | Ventas esporádicas exentas. |
-| 5 | 515 (cant.) | 587 (neto) | Facturas de compra recibidas con retención total + facturas de inicio | **IMPORTANTE**: Aquí van las facturas de compra emitidas a proveedores digitales extranjeros (AWS, Azure, etc.). |
+| 5 | 515 (cant.) | 587 (neto) | Facturas de compra recibidas con retención total + facturas de inicio | **OJO**: Esta línea es para el **contribuyente retenido** (vendedor), NO para el agente retenedor. Las FC que emite TOTOMENU a proveedores extranjeros van en **línea 28** (519/520) como crédito + **líneas 118-122** (39/596) como retención. |
 | 6 | — | 720 | Facturas de compra con retención parcial (contribuyente retenido) | Poco frecuente en software. |
 
 ### Líneas Generadoras de Débito (+) y Reducciones (−)
@@ -63,7 +63,7 @@
 
 | Línea | Cód. Cantidad | Cód. Crédito | Signo | Descripción | Notas Software |
 |-------|--------------|-------------|-------|-------------|----------------|
-| 28 | 519 | 520 | **+** | **Facturas recibidas del giro con derecho a CF** | ⭐ LÍNEA PRINCIPAL: IVA de arriendos, internet, servicios cloud, insumos. |
+| 28 | 519 | 520 | **+** | **Facturas recibidas del giro con derecho a CF** | ⭐ LÍNEA PRINCIPAL. Incluye: (1) facturas chilenas recibidas, (2) **FC emitidas como agente retenedor** (proveedores extranjeros). El IVA de las FC va aquí como crédito fiscal. |
 | 29 | 761 | 762 | + | Facturas supermercados/comercios | Compras menores. |
 | 30 | 765 | 766 | + | Facturas inmuebles | No aplica habitualmente. |
 | 31 | 524 | 525 | **+** | **Facturas activo fijo** | ⭐ IVA de computadores, servidores, monitores. Separar porque permite Art. 27 bis. |
@@ -131,12 +131,46 @@
 
 ---
 
+## CAMBIO DE SUJETO — AGENTE RETENEDOR (Líneas 118–122)
+
+> ⭐ **SECCIÓN CLAVE PARA EMPRESAS CON FC**: Aquí se registra el IVA retenido por las
+> Facturas de Compra emitidas a proveedores extranjeros. Este monto se **paga al SII**
+> como obligación separada del IVA propio. No se compensa con el remanente de CF.
+
+| Línea | Código | Descripción | Notas Software |
+|-------|--------|-------------|----------------|
+| 118 | **39** | IVA total retenido a terceros (retención total, tasa 19%) | ⭐ Suma del IVA de todas las FC emitidas en el período. |
+| 119 | 554 | IVA parcial retenido a terceros (según tasa variable) | No aplica habitualmente a software. |
+| 120 | **736** | IVA retenido por NC emitidas (reduce la retención) | NC de compra que anulan FC. Se resta de la retención. |
+| 121 | 597 | Retención del margen de comercialización | No aplica a software. |
+| 122 | 555, **596** | Retención Anticipo + **Retención Cambio de Sujeto neta** | ⭐ **596 = 39 + 554 − 736 + 597**. Es el monto que se paga al SII. |
+
+**Flujo para empresas de software (caso TOTOMENU)**:
+```
+Cod 39  = Σ IVA de todas las FC emitidas (ej: $958,277)
+Cod 736 = Σ IVA de NC de compra (ej: $4,375)
+Cod 596 = 39 - 736 = retención neta (ej: $953,902) → SE PAGA
+```
+
+## CAMBIO DE SUJETO — CONTRIBUYENTES RETENIDOS (Líneas 113–117)
+
+| Línea | Código | Descripción | Notas Software |
+|-------|--------|-------------|----------------|
+| 113 | 556 | IVA anticipado del período | No aplica (TOTOMENU es retenedor, no retenido). |
+| 114 | 557 | Remanente del mes anterior | — |
+| 115 | 558 | Devolución del mes anterior | — |
+| 116 | 543 | Total de Anticipo | — |
+| 117 | 573, 598 | Remanente / Anticipo a imputar | — |
+
+---
+
 ## SUBTOTAL Y TOTAL A PAGAR (Líneas 80, 141–144)
 
 | Línea | Código | Descripción | Cálculo |
 |-------|--------|-------------|---------|
 | 80 | **595** | Subtotal impuesto determinado anverso | código 89 + retenciones (48+151+153+...) + PPM (62) − crédito SENCE (723) |
-| 141 | **91** | **TOTAL A PAGAR EN PLAZO LEGAL** | código 595 + impuestos adicionales reverso (si aplica) |
+| 140 | **547** | Total determinado | código 595 + código 596 (retención cambio sujeto) + otros reverso |
+| 141 | **91** | **TOTAL A PAGAR EN PLAZO LEGAL** | código 547 (= 595 + 596 + adicionales) |
 | 142 | 92 | Más IPC (reajuste por atraso) | Solo si se paga fuera de plazo |
 | 143 | 93 | Más intereses (1,5%/mes) y multas | Solo si se paga fuera de plazo |
 | 144 | **94** | **TOTAL A PAGAR CON RECARGO** | código 91 + código 92 + código 93 |

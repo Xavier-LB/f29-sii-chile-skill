@@ -119,20 +119,28 @@ Si **no** emites la Factura de Compra, el SII puede:
 
 ### Qué servicios digitales requieren este tratamiento
 
-Desde la actualización de la Ley 21.713 (noviembre 2024), **todos los servicios
+Desde la actualización de la **Ley 21.713 (noviembre 2024)**, **todos los servicios
 remotos** prestados por no residentes están sujetos, no solo las 4 categorías
-originales de la Ley 21.210. Esto incluye:
+originales de la Ley 21.210. El texto cambió de "digital" a "remoto". Esto incluye:
 - Cloud computing (AWS, Azure, GCP, DigitalOcean, Heroku)
 - SaaS que usa la empresa (Slack, Notion, Figma, GitHub, etc.)
 - Servicios de infraestructura (Cloudflare, Vercel, Netlify)
-- Herramientas de desarrollo (JetBrains, Postman Pro, etc.)
+- Herramientas de desarrollo (JetBrains, Postman Pro, Cursor, etc.)
 - Publicidad digital (Google Ads, Meta Ads) — si se factura desde el exterior
+- Herramientas IA (OpenAI, Anthropic, Gladia, Deepgram, etc.)
 
-Excepción: Si el proveedor extranjero ya está registrado ante el SII como
-contribuyente de IVA digital (Amazon, Google, Microsoft lo están para servicios
-a consumidores finales), la obligación de emitir Factura de Compra **persiste**
-cuando el beneficiario es empresa, porque el mecanismo de retención B2B es
-independiente del registro del proveedor.
+### Cuándo NO emitir Factura de Compra
+
+**Excepción importante**: Si el proveedor extranjero **cobra IVA chileno (19%)**
+directamente en su invoice, **NO se debe emitir FC**. El IVA ya está declarado
+por el proveedor ante el SII. Ejemplos:
+- Anthropic/Claude (desde 2025): Cobra 19% IVA en sus invoices → NO requiere FC
+- LinkedIn (con factura chilena): Cobra IVA → NO requiere FC
+- NordVPN, Photoroom, OpenAI: NO cobran IVA chileno → SÍ requieren FC
+
+**Regla para verificar**: Si la invoice muestra un ítem "VAT" o "IVA" con tasa 19%
+sobre el subtotal, y la dirección de facturación es Chile, probablemente el
+proveedor ya está registrado y cobra IVA. Verificar en el SII si tiene RUT chileno.
 
 ---
 
@@ -188,7 +196,7 @@ empresa de software debería verificar siempre estos puntos:
 
 ### Lo que la propuesta NO incluye y hay que agregar manualmente
 - **Facturas de exportación** (línea 1, código 585)
-- **Facturas de compra por servicios digitales** (línea 5, código 515)
+- **Facturas de compra por servicios remotos** — crédito en línea 28 (520) + retención en línea 118 (39/596)
 - **Retenciones de boletas de honorarios** (línea 61, código 151)
 - **Impuesto Único de Segunda Categoría** si hay nómina (línea 60, código 48)
 - **Crédito SENCE** (línea 75, código 723)
@@ -279,3 +287,6 @@ separado de las compras del giro. Esto es importante porque:
 | Boletas de honorarios — tasas de retención | https://www.sii.cl/destacados/boletas_honorarios/aumento_gradual.html |
 | Preguntas frecuentes IVA software (SII) | https://www.sii.cl/preguntas_frecuentes/impuestos_mensuales/001_130_5446.htm |
 | Exportación de servicios (Subrei) | https://www.subrei.gob.cl/preguntas-frecuentes/exportacion-de-servicios |
+| Ley 21.713 — Servicios remotos (SII) | https://www.sii.cl/destacados/liquidacion_factura/ |
+| Circular SII N°12/2025 — Régimen simplificado IVA no residentes | https://www.sii.cl/normativa_legislacion/circulares/2025/ |
+| Liquidación Factura vs Factura de Compra (SII) | https://www.sii.cl/preguntas_frecuentes/catastro/001_012_4498.htm |
